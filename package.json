@@ -1,0 +1,29 @@
+{
+  "name": "snapora",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Snapora — Modern, secure, open-source multi-URL media downloader queue",
+  "workspaces": [
+    "frontend",
+    "backend"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=frontend & npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "dev:backend": "npm run dev --workspace=backend",
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "keywords": [
+    "snapora",
+    "media-downloader",
+    "react",
+    "fastify",
+    "typescript",
+    "open-source"
+  ],
+  "author": "Snapora Contributors",
+  "license": "MIT"
+}

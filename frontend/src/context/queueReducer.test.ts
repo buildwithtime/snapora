@@ -1,0 +1,217 @@
+import { describe, it, expect } from 'vitest';
+import { QueueState } from '../types/queue.js';
+import { queueReducer } from './QueueContext.js';
+
+describe('Queue State Machine Transitions', () => {
+  const initialState: QueueState = {
+    jobs: [],
+    isPaused: false,
+    activeJobId: null
+  };
+
+  it('handles ADD_JOBS action', () => {
+    const state = queueReducer(initialState, {
+      type: 'ADD_JOBS',
+      payload: [
+        { url: 'https://instagram.com/p/123/', normalizedUrl: 'https://www.instagram.com/p/123/', shortcode: '123' }
+      ]
+    });
+
+    expect(state.jobs).toHaveLength(1);
+    expect(state.jobs[0].status).toBe('queued');
+    expect(state.jobs[0].shortcode).toBe('123');
+  });
+
+  it('handles START_JOB and transitions status to fetching', () => {
+    const withJobState: QueueState = {
+      jobs: [
+        {
+          id: 'job_1',
+          url: 'test',
+          normalizedUrl: 'test',
+          shortcode: '123',
+          status: 'queued',
+          createdAt: 100,
+          retryCount: 0
+        }
+      ],
+      isPaused: false,
+      activeJobId: null
+    };
+
+    const state = queueReducer(withJobState, {
+      type: 'START_JOB',
+      payload: { jobId: 'job_1' }
+    });
+
+    expect(state.activeJobId).toBe('job_1');
+    expect(state.jobs[0].status).toBe('fetching');
+  });
+
+  it('handles JOB_SUCCESS and clears activeJobId', () => {
+    const runningState: QueueState = {
+      jobs: [
+        {
+          id: 'job_1',
+          url: 'test',
+          normalizedUrl: 'test',
+          shortcode: '123',
+          status: 'fetching',
+          createdAt: 100,
+          retryCount: 0
+        }
+      ],
+      isPaused: false,
+      activeJobId: 'job_1'
+    };
+
+    const state = queueReducer(runningState, {
+      type: 'JOB_SUCCESS',
+      payload: {
+        jobId: 'job_1',
+        media: [{ type: 'image', url: 'https://example.com/img.jpg', filename: 'img.jpg' }]
+      }
+    });
+
+    expect(state.activeJobId).toBeNull();
+    expect(state.jobs[0].status).toBe('ready');
+    expect(state.jobs[0].media).toHaveLength(1);
+  });
+
+  it('handles JOB_FAILURE and records error code', () => {
+    const runningState: QueueState = {
+      jobs: [
+        {
+          id: 'job_1',
+          url: 'test',
+          normalizedUrl: 'test',
+          shortcode: '123',
+          status: 'fetching',
+          createdAt: 100,
+          retryCount: 0
+        }
+      ],
+      isPaused: false,
+      activeJobId: 'job_1'
+    };
+
+    const state = queueReducer(runningState, {
+      type: 'JOB_FAILURE',
+      payload: {
+        jobId: 'job_1',
+        code: 'PRIVATE_ACCOUNT',
+        message: 'Account is private'
+      }
+    });
+
+    expect(state.activeJobId).toBeNull();
+    expect(state.jobs[0].status).toBe('failed');
+    expect(state.jobs[0].error?.code).toBe('PRIVATE_ACCOUNT');
+  });
+
+  it('handles PAUSE_QUEUE and RESUME_QUEUE', () => {
+    let state = queueReducer(initialState, { type: 'PAUSE_QUEUE' });
+    expect(state.isPaused).toBe(true);
+
+    state = queueReducer(state, { type: 'RESUME_QUEUE' });
+    expect(state.isPaused).toBe(false);
+  });
+
+  it('handles RETRY_JOB only on failed jobs', () => {
+    const mixedState: QueueState = {
+      jobs: [
+        {
+          id: 'job_failed',
+          url: 'test',
+          normalizedUrl: 'test',
+          shortcode: '123',
+          status: 'failed',
+          createdAt: 100,
+          retryCount: 0
+        },
+        {
+          id: 'job_fetching',
+          url: 'test2',
+          normalizedUrl: 'test2',
+          shortcode: '456',
+          status: 'fetching',
+          createdAt: 200,
+          retryCount: 0
+        }
+      ],
+      isPaused: false,
+      activeJobId: 'job_fetching'
+    };
+
+    // Retrying a failed job should transition it to queued
+    const retryFailed = queueReducer(mixedState, {
+      type: 'RETRY_JOB',
+      payload: { jobId: 'job_failed' }
+    });
+    expect(retryFailed.jobs[0].status).toBe('queued');
+    expect(retryFailed.jobs[0].retryCount).toBe(1);
+
+    // Retrying an in-flight fetching job must NOT reset it
+    const retryFetching = queueReducer(mixedState, {
+      type: 'RETRY_JOB',
+      payload: { jobId: 'job_fetching' }
+    });
+    expect(retryFetching.jobs[1].status).toBe('fetching');
+  });
+
+  it('handles REMOVE_JOB and clears activeJobId if matching', () => {
+    const stateWithActive: QueueState = {
+      jobs: [
+        {
+          id: 'job_active',
+          url: 'test',
+          normalizedUrl: 'test',
+          shortcode: '123',
+          status: 'fetching',
+          createdAt: 100,
+          retryCount: 0
+        }
+      ],
+      isPaused: false,
+      activeJobId: 'job_active'
+    };
+
+    const removed = queueReducer(stateWithActive, {
+      type: 'REMOVE_JOB',
+      payload: { jobId: 'job_active' }
+    });
+
+    expect(removed.jobs).toHaveLength(0);
+    expect(removed.activeJobId).toBeNull();
+  });
+
+  it('handles CLEAR_COMPLETED preserving queued and fetching jobs', () => {
+    const mixedState: QueueState = {
+      jobs: [
+        { id: '1', url: '1', normalizedUrl: '1', shortcode: '1', status: 'ready', createdAt: 1, retryCount: 0 },
+        { id: '2', url: '2', normalizedUrl: '2', shortcode: '2', status: 'failed', createdAt: 2, retryCount: 0 },
+        { id: '3', url: '3', normalizedUrl: '3', shortcode: '3', status: 'queued', createdAt: 3, retryCount: 0 },
+        { id: '4', url: '4', normalizedUrl: '4', shortcode: '4', status: 'fetching', createdAt: 4, retryCount: 0 }
+      ],
+      isPaused: false,
+      activeJobId: '4'
+    };
+
+    const cleared = queueReducer(mixedState, { type: 'CLEAR_COMPLETED' });
+    expect(cleared.jobs.map((j) => j.id)).toEqual(['3', '4']);
+  });
+
+  it('handles HYDRATE_STATE and resets activeJobId', () => {
+    const hydrated = queueReducer(initialState, {
+      type: 'HYDRATE_STATE',
+      payload: {
+        jobs: [
+          { id: 'saved_1', url: '1', normalizedUrl: '1', shortcode: '1', status: 'queued', createdAt: 1, retryCount: 0 }
+        ]
+      }
+    });
+
+    expect(hydrated.jobs).toHaveLength(1);
+    expect(hydrated.activeJobId).toBeNull();
+  });
+});
