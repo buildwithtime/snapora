@@ -169,6 +169,7 @@ Copy `.env.example` to `.env` or configure these environment variables in your h
    * **Build Command**: `npm run build`
    * **Start Command**: `npm start`
    * **Health Check Path**: `/health`
+   > *Note: The repository's root `.npmrc` (`include=dev`) automatically ensures workspace `devDependencies` needed for TypeScript compilation and Vite bundling are installed during Render's build process, even when `NODE_ENV=production` is active.*
 5. Under **Environment Variables**, add:
    * `NODE_ENV`: `production`
    * `DEFAULT_PROVIDER`: `public`
