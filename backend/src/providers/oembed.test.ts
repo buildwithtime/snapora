@@ -220,4 +220,43 @@ describe('InstagramOEmbedProvider', () => {
       expect(result.error.code).toBe('TIMEOUT');
     }
   });
+
+  it('classifies DOMException abort errors as TIMEOUT', async () => {
+    const mockFetch = async () => {
+      const err = new DOMException('The user aborted a request.', 'AbortError');
+      throw err;
+    };
+
+    const provider = new InstagramOEmbedProvider({
+      accessToken: 'test_token',
+      fetchFn: mockFetch as unknown as typeof fetch
+    });
+
+    const result = await provider.resolve(canonicalUrl, shortcode);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('TIMEOUT');
+      expect(result.error.message).toContain('timed out');
+    }
+  });
+
+  it('classifies TimeoutError as TIMEOUT', async () => {
+    const mockFetch = async () => {
+      const err = new Error('The operation was interrupted due to timeout');
+      err.name = 'TimeoutError';
+      throw err;
+    };
+
+    const provider = new InstagramOEmbedProvider({
+      accessToken: 'test_token',
+      fetchFn: mockFetch as unknown as typeof fetch
+    });
+
+    const result = await provider.resolve(canonicalUrl, shortcode);
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('TIMEOUT');
+      expect(result.error.message).toContain('timed out');
+    }
+  });
 });

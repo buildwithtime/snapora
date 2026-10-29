@@ -301,8 +301,8 @@ export class InstagramOEmbedProvider implements IMediaProvider {
       clearTimeout(timeoutHandle);
 
       const isAbort =
-        (err instanceof DOMException && err.name === 'AbortError') ||
-        (err instanceof Error && err.name === 'AbortError');
+        (err instanceof Error && (err.name === 'AbortError' || err.name === 'TimeoutError')) ||
+        (typeof err === 'object' && err !== null && 'name' in err && (err as { name: unknown }).name === 'AbortError');
 
       if (isAbort) {
         return {
