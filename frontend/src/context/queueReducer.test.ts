@@ -214,4 +214,140 @@ describe('Queue State Machine Transitions', () => {
     expect(hydrated.jobs).toHaveLength(1);
     expect(hydrated.activeJobId).toBeNull();
   });
+
+  it('transitions to preview_ready when live preview is retrieved without direct media download', () => {
+    const runningState: QueueState = {
+      jobs: [
+        {
+          id: 'job_preview_1',
+          url: 'https://instagram.com/p/Prev123/',
+          normalizedUrl: 'https://www.instagram.com/p/Prev123/',
+          shortcode: 'Prev123',
+          status: 'fetching',
+          createdAt: 100,
+          retryCount: 0
+        }
+      ],
+      isPaused: false,
+      activeJobId: 'job_preview_1'
+    };
+
+    const nextState = queueReducer(runningState, {
+      type: 'JOB_SUCCESS',
+      payload: {
+        jobId: 'job_preview_1',
+        resolutionStatus: 'live_preview_retrieved',
+        provider: 'InstagramOEmbedProvider',
+        downloadAvailable: false,
+        preview: {
+          type: 'embed',
+          thumbnailUrl: 'https://cdn.example.com/thumb.jpg',
+          authorName: 'photographer'
+        },
+        media: []
+      }
+    });
+
+    expect(nextState.activeJobId).toBeNull();
+    expect(nextState.jobs[0].status).toBe('preview_ready');
+    expect(nextState.jobs[0].resolutionStatus).toBe('live_preview_retrieved');
+    expect(nextState.jobs[0].downloadAvailable).toBe(false);
+    expect(nextState.jobs[0].preview?.authorName).toBe('photographer');
+  });
+
+  it('records classified resolutionStatus on failure', () => {
+    const runningState: QueueState = {
+      jobs: [
+        {
+          id: 'job_fail_1',
+          url: 'https://instagram.com/p/Priv123/',
+          normalizedUrl: 'https://www.instagram.com/p/Priv123/',
+          shortcode: 'Priv123',
+          status: 'fetching',
+          createdAt: 100,
+          retryCount: 0
+        }
+      ],
+      isPaused: false,
+      activeJobId: 'job_fail_1'
+    };
+
+    const nextState = queueReducer(runningState, {
+      type: 'JOB_FAILURE',
+      payload: {
+        jobId: 'job_fail_1',
+        code: 'PROVIDER_NOT_CONFIGURED',
+        message: 'Meta API credentials missing',
+        resolutionStatus: 'preview_unavailable'
+      }
+    });
+
+    expect(nextState.activeJobId).toBeNull();
+    expect(nextState.jobs[0].status).toBe('failed');
+    expect(nextState.jobs[0].resolutionStatus).toBe('preview_unavailable');
+    expect(nextState.jobs[0].error?.code).toBe('PROVIDER_NOT_CONFIGURED');
+  });
+
+  it('updates item download status on SET_ITEM_DOWNLOAD_STATUS', () => {
+    const readyState: QueueState = {
+      jobs: [
+        {
+          id: 'job_dl_1',
+          url: 'https://instagram.com/p/DL123/',
+          normalizedUrl: 'https://www.instagram.com/p/DL123/',
+          shortcode: 'DL123',
+          status: 'ready',
+          createdAt: 100,
+          retryCount: 0,
+          media: [
+            { id: 'item_1', type: 'image', url: 'https://cdn.example.com/photo.jpg', filename: 'photo.jpg', status: 'pending' }
+          ]
+        }
+      ],
+      isPaused: false,
+      activeJobId: null
+    };
+
+    const downloadingState = queueReducer(readyState, {
+      type: 'SET_ITEM_DOWNLOAD_STATUS',
+      payload: {
+        jobId: 'job_dl_1',
+        itemId: 'item_1',
+        status: 'downloading',
+        progress: 50
+      }
+    });
+
+    expect(downloadingState.jobs[0].media?.[0].status).toBe('downloading');
+
+    const completedState = queueReducer(downloadingState, {
+      type: 'SET_ITEM_DOWNLOAD_STATUS',
+      payload: {
+        jobId: 'job_dl_1',
+        itemId: 'item_1',
+        status: 'completed',
+        progress: 100
+      }
+    });
+
+    expect(completedState.jobs[0].media?.[0].status).toBe('completed');
+  });
+
+  it('updates overall downloadAllStats on SET_DOWNLOAD_ALL_STATS', () => {
+    const state = queueReducer(initialState, {
+      type: 'SET_DOWNLOAD_ALL_STATS',
+      payload: {
+        active: true,
+        total: 5,
+        completed: 2,
+        failed: 0,
+        currentFilename: 'photo_3.jpg'
+      }
+    });
+
+    expect(state.downloadAllStats?.active).toBe(true);
+    expect(state.downloadAllStats?.total).toBe(5);
+    expect(state.downloadAllStats?.completed).toBe(2);
+    expect(state.downloadAllStats?.currentFilename).toBe('photo_3.jpg');
+  });
 });

@@ -27,6 +27,9 @@ export const SecurityBanner: React.FC = () => {
       <p>
         • <strong>SSRF-Safe Upstream Proxy:</strong> All upstream requests are verified against a strict domain allowlist, enforce HTTPS, and disallow internal IP addresses.
       </p>
+      <p>
+        • <strong>Official Previews & Authorized Media:</strong> Live mode integrates with official Meta oEmbed endpoints. In accordance with platform Terms of Service and application security principles, Snapora does not perform unauthenticated web scraping, credential collection, or private account extraction.
+      </p>
     </footer>
   );
 };

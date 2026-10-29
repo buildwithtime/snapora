@@ -45,6 +45,19 @@ export const Header: React.FC = () => {
             >
               Open Source v0.1
             </span>
+            <span
+              style={{
+                fontSize: '0.7rem',
+                fontWeight: 600,
+                padding: '0.2rem 0.5rem',
+                borderRadius: '4px',
+                background: import.meta.env.VITE_DEMO_MODE === 'true' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(16, 185, 129, 0.12)',
+                color: import.meta.env.VITE_DEMO_MODE === 'true' ? '#fcd34d' : '#6ee7b7',
+                border: import.meta.env.VITE_DEMO_MODE === 'true' ? '1px solid rgba(245, 158, 11, 0.25)' : '1px solid rgba(16, 185, 129, 0.25)'
+              }}
+            >
+              {import.meta.env.VITE_DEMO_MODE === 'true' ? 'Demo Mode (Simulated)' : 'Live Mode'}
+            </span>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
             Sequential, privacy-focused media queue engine with IndexedDB persistence

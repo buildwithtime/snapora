@@ -1,72 +1,141 @@
-# MEDIA PROVIDER STATUS & OFFICIAL API FEASIBILITY REPORT — SNAPORA
+# MEDIA PROVIDER STATUS & OFFICIAL API ARCHITECTURE — SNAPORA
 
-## 1. Current Operational State
+## 1. Provider Implementations
 
-### Operational Provider
-The active provider is `MockProvider` located at `backend/src/providers/mock.ts`.
-- **Purpose**: Provides deterministic, reproducible fixtures for development, UI validation, queue testing, and offline demonstration.
-- **Fixture Logic**:
-  - Shortcodes containing `private` yield HTTP 403 `PRIVATE_ACCOUNT`.
-  - Shortcodes containing `error` yield HTTP 502 `PROVIDER_ERROR`.
-  - Shortcodes containing `video` or `reel` yield MP4 video fixtures with dimension metadata.
-  - Shortcodes containing `carousel` or `multi` yield multi-image arrays.
-  - Standard shortcodes yield 1080x1080 photo fixtures.
-- **Transparency Statement**: Snapora explicitly identifies that media retrieved under this provider is simulated. No real Instagram media is scraped or harvested.
+Snapora implements a modular provider interface (`IMediaProvider` in `backend/src/providers/types.ts`) supporting two operational modes:
 
----
+### A. Deterministic `MockProvider` (`backend/src/providers/mock.ts`)
+* **Default Mode**: Used when `DEFAULT_PROVIDER=mock` or in client-side standalone Demo Mode (`VITE_DEMO_MODE=true`).
+* **Purpose**: Provides offline, reproducible fixtures for development, UI validation, queue stress testing, and public demonstration.
+* **Fixture Specifications**:
+  * Shortcodes containing `private`: Classified as HTTP 403 `PRIVATE_ACCOUNT` / `CONTENT_PRIVATE`.
+  * Shortcodes containing `error`: Classified as HTTP 502 `PROVIDER_ERROR`.
+  * Shortcodes containing `video` or `reel`: Generates simulated MP4 video fixture.
+  * Shortcodes containing `carousel` or `multi`: Generates multi-image carousel fixture.
+  * Standard shortcodes: Generates single photo fixture.
+* **Transparency Notice**: All media returned by MockProvider is clearly marked with `disclaimer: 'Simulated fixture generated for offline testing.'`
 
-## 2. Investigation of Official Meta Interfaces
-
-A rigorous technical investigation was conducted against official Meta documentation for Instagram media access interfaces:
-
-### A. Instagram Basic Display API
-* **Status**: **DEPRECATED & DECOMMISSIONED**.
-* **Timeline**: Deprecated October 24, 2024; fully discontinued in December 2024.
-* **Findings**: Cannot be used for any new applications. Previously allowed personal profile media access with user consent.
-
-### B. Instagram Graph API
-* **Target Audience**: Business and Creator accounts only.
-* **Requirements**:
-  1. Meta for Developers account with a registered App.
-  2. Instagram Professional (Business/Creator) account linked to a verified Facebook Page.
-  3. OAuth 2.0 User Access Token (`instagram_basic`, `pages_show_list`).
-  4. Meta App Review approval for production permissions.
-* **Scope & Limitation**:
-  - The Graph API endpoint `GET /{ig-user-id}/media` **only returns the media owned by the authenticated account**.
-  - It does **not** allow querying or retrieving third-party public posts by URL or shortcode.
-* **Verdict for Snapora**: Incompatible with Snapora's multi-URL downloader queue for arbitrary public posts. Asking users to link Facebook Business accounts and grant account management permissions directly contradicts Snapora's **Zero-Credential** privacy design.
-
-### C. Instagram oEmbed API
-* **Endpoint**: `GET https://graph.facebook.com/v21.0/instagram_oembed?url={url}&access_token={app_id}|{client_token}`
-* **Requirements**:
-  1. Meta Developer App.
-  2. App Access Token (`{app_id}|{client_token}`). No user login required.
-  3. Meta Feature `oEmbed Read` (requires App Review for public access; works in Dev Mode for app admins).
-* **Returned Data**:
-  - `author_name`, `author_url`, `title`, `thumbnail_url`, `thumbnail_width`, `thumbnail_height`, `html` (iframe embed code).
-* **Limitations on Downloadable Media**:
-  - Returns low/medium resolution `thumbnail_url`.
-  - **Does NOT return raw full-resolution video MP4 streams or multi-item carousel image URLs**.
-* **Verdict for Snapora**: Suitable for an authorized metadata and preview provider (`InstagramOEmbedProvider`), but technically incapable of serving as a full-resolution media downloader.
-
-### D. Unauthenticated Public Web Scraping (HTML/GraphQL)
-* **Technical Constraints**: Meta deploys aggressive anti-bot defenses, IP reputation filters, ephemeral GraphQL signatures, and mandatory login redirects (`/accounts/login/?next=...`). Unauthenticated cloud IPs are blocked almost instantly.
-* **Legal & Policy Constraints**: Section 3.2.3 of Meta's Terms of Use explicitly prohibits automated scraping without prior written permission.
-* **Verdict for Snapora**: Circumventing anti-bot protections or harvesting session cookies is explicitly rejected as it violates project principles, platform terms, and user security.
+### B. Official `InstagramOEmbedProvider` (`backend/src/providers/oembed.ts`)
+* **Live Mode**: Used when `DEFAULT_PROVIDER=oembed`.
+* **Purpose**: Retrieves official public preview metadata, author handle, post title, iframe embed code, and thumbnail image directly from Meta's Graph API.
+* **Backend Credentials**: Uses Meta App ID and Client Token (`INSTAGRAM_APP_ID`, `INSTAGRAM_CLIENT_TOKEN`) strictly on the backend. No credentials are ever exposed to the client.
 
 ---
 
-## 3. Provider Architecture Decision
+## 2. Meta Developer Setup Guide for Live Previews
 
-| Route | Feasibility | Decision |
-|---|---|---|
-| **Deterministic MockProvider** | 100% Verified | **Retain as Default**: Ensures reliable local development, UI testing, and preview demonstration without external dependencies. |
-| **Instagram oEmbed Provider** | Verified (Requires Meta App ID) | **Optional Extension**: Can be added as an opt-in provider for users who supply their own Meta App ID + Client Token for thumbnail and caption extraction. |
-| **Unauthenticated Scraper** | Volatile / TOS Violation | **Rejected**: Circumvents access controls; will not be implemented. |
+To enable official live Instagram previews in Snapora:
+
+1. **Create a Meta Developer Account**:
+   * Visit [Meta for Developers](https://developers.facebook.com/).
+   * Register or log in with your Meta account.
+2. **Create a Meta App**:
+   * Navigate to **My Apps** > **Create App**.
+   * Select **Other** as the use case.
+   * Choose app type **Business** or **Consumer**.
+3. **Add the oEmbed Product**:
+   * In your App Dashboard, search for **oEmbed** and click **Set Up**.
+   * Enable the **oEmbed Read** feature.
+   * *Note*: In Development Mode, the app can query public posts when called by App Administrators and Developers. For unrestricted public use, Meta requires App Review.
+4. **Obtain Credentials**:
+   * Navigate to **App Settings** > **Advanced**.
+   * Copy the **App ID** and **Client Token**.
+5. **Configure Backend Environment**:
+   * In your backend `.env` file:
+     ```env
+     DEFAULT_PROVIDER=oembed
+     INSTAGRAM_APP_ID=your_meta_app_id
+     INSTAGRAM_CLIENT_TOKEN=your_meta_client_token
+     ```
+   * Alternatively, configure the direct token:
+     ```env
+     INSTAGRAM_OEMBED_ACCESS_TOKEN=your_meta_app_id|your_meta_client_token
+     ```
 
 ---
 
-## 4. UI Transparency Guidelines
+## 3. Official API Field Mapping & Limitations
+
+### Supported Content Types
+* Instagram Posts (`/p/{shortcode}/`)
+* Instagram Reels (`/reel/{shortcode}/`, `/reels/{shortcode}/`)
+* Instagram TV (`/tv/{shortcode}/`)
+
+### Available Metadata Fields
+| Field Name | Type | Description |
+| :--- | :--- | :--- |
+| `author_name` | `string` | Display name or handle of the Instagram author |
+| `author_url` | `string` | Link to the author's Instagram profile |
+| `title` | `string` | Caption text or title summary of the post |
+| `html` | `string` | Official Instagram embed blockquote snippet |
+| `thumbnail_url` | `string` | Direct URL to image thumbnail |
+| `thumbnail_width` | `number` | Width of the thumbnail in pixels |
+| `thumbnail_height`| `number` | Height of the thumbnail in pixels |
+| `provider_name` | `string` | Always `"Instagram"` |
+
+### API Limitations & Classified Statuses
+* **No Raw Media Streams**: Meta's oEmbed API explicitly does **not** provide downloadable MP4 video files or high-resolution carousel files.
+* **Content Eligibility**: Only public posts with third-party embedding enabled can be retrieved.
+* **Classified Errors**:
+  * `PROVIDER_NOT_CONFIGURED`: Missing Meta credentials in backend `.env`.
+  * `CONTENT_PRIVATE`: Account is private or embedding is disabled by the creator.
+  * `CONTENT_UNAVAILABLE`: Post deleted or shortcode not found (HTTP 404).
+  * `RATE_LIMITED`: Meta API rate limit exceeded (HTTP 429).
+  * `AUTHENTICATION_ERROR`: Invalid or expired Meta access token.
+
+---
+
+## 4. Separation of Preview vs. Media Downloading
+
+Snapora enforces a strict architectural boundary between preview retrieval and file downloading:
+
+```
+┌────────────────────────────────────────────────────────┐
+│                   Instagram URL                        │
+└──────────────────────────┬─────────────────────────────┘
+                           │
+                 [URL Normalization]
+                           │
+                           ▼
+┌────────────────────────────────────────────────────────┐
+│              Official Live Preview Mode                │
+│             (Meta Graph API oEmbed v21.0)              │
+│                                                        │
+│  ✓ Post Author & Profile Link                          │
+│  ✓ Caption Snippet & Title                             │
+│  ✓ Official Embed Blockquote                           │
+│  ✓ Preview Thumbnail Image                             │
+│                                                        │
+│  ✗ Raw Video (MP4) Stream (Not provided by Meta)       │
+│  ✗ High-Res Carousel Images (Not provided by Meta)     │
+└────────────────────────────────────────────────────────┘
+```
+
+When a live preview is retrieved:
+* `status` transitions to `preview_ready` (`live_preview_retrieved`).
+* `downloadAvailable` is set to `false`.
+* The UI renders an **Official Live Preview Card** with the thumbnail, author, and external link.
+* **No misleading "Download Video/Photo" button is rendered**.
+
+---
+
+## 5. Authorized Download Pathways
+
+For scenarios where raw media download is required:
+
+1. **Authorized Graph API User Media (`/me/media`)**:
+   * For accounts owned or managed by an authenticated user, the Instagram Graph API provides temporary direct `media_url` streams.
+   * Requires user OAuth login with `instagram_basic` and Facebook Page management permissions.
+2. **User-Supplied Direct Media**:
+   * Users can supply direct media URLs that they have legal authority and authorization to access.
+3. **Local Media File Selection**:
+   * Local file selection in the browser for storage and queue processing.
+
+### Prohibited Pathways (Defense Against Abuse)
+* Unauthenticated web scraping or anti-bot bypasses.
+* Storing or harvesting Instagram user session cookies.
+* Private account bypasses without authorization.
+* Undocumented private API reverse-engineering.
 
 To ensure open-source integrity:
 1. All demonstration fixtures must remain clearly labelled.

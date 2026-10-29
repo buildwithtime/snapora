@@ -39,3 +39,9 @@ coverage/
 Thumbs.db
 *.zip
 *.tar.gz
+
+scratch/
+
+# Local-only research and verification scripts
+local-reference/
+scratch/

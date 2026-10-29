@@ -1,12 +1,14 @@
 import { FastifyInstance } from 'fastify';
 
 export async function healthRoutes(app: FastifyInstance) {
-  app.get('/api/health', async () => {
-    return {
-      ok: true,
-      service: 'snapora-backend',
-      timestamp: new Date().toISOString(),
-      uptimeSeconds: Math.floor(process.uptime())
-    };
+  const handler = async () => ({
+    ok: true,
+    service: 'snapora-backend',
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.floor(process.uptime())
   });
+
+  app.get('/health', handler);
+  app.get('/api/health', handler);
 }

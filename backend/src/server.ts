@@ -1,21 +1,28 @@
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
 import rateLimit from '@fastify/rate-limit';
+import fastifyStatic from '@fastify/static';
 import { config } from './config/index.js';
 import { healthRoutes } from './routes/health.js';
 import { resolveRoutes } from './routes/resolve.js';
+import { downloadRoutes } from './routes/download.js';
 import { createErrorResponse } from './utils/errors.js';
 import { IMediaProvider } from './providers/types.js';
 
 export interface BuildServerOptions {
   provider?: IMediaProvider;
   enableRateLimit?: boolean;
+  serveStatic?: boolean;
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
     logger: config.nodeEnv !== 'test',
-    disableRequestLogging: config.nodeEnv === 'test'
+    disableRequestLogging: config.nodeEnv === 'test',
+    bodyLimit: 1048576 // 1MB payload ceiling
   });
 
   // Security: CORS
@@ -40,14 +47,50 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     request.log.error(error);
     const statusCode = error.statusCode || 500;
     const code = statusCode === 429 ? 'RATE_LIMITED' : 'PROVIDER_ERROR';
+
+    let clientMessage = error.message || 'An internal error occurred';
+    if (config.nodeEnv === 'production' && statusCode >= 500) {
+      clientMessage = 'An unexpected internal server error occurred. Please try again later.';
+    }
+
     reply.status(statusCode).send(
-      createErrorResponse(code, error.message || 'An internal error occurred')
+      createErrorResponse(code, clientMessage)
     );
   });
 
-  // Register routes
+  // Register API routes
   await app.register(healthRoutes);
   await app.register(resolveRoutes, { provider: options.provider });
+  await app.register(downloadRoutes);
+
+  // Serve compiled frontend when dist directory exists (single-service deployment)
+  if (options.serveStatic !== false && config.nodeEnv !== 'test') {
+    const currentDir = path.dirname(fileURLToPath(import.meta.url));
+    const candidateDirs = [
+      path.resolve(process.cwd(), 'frontend/dist'),
+      path.resolve(process.cwd(), '../frontend/dist'),
+      path.resolve(currentDir, '../../frontend/dist'),
+      path.resolve(currentDir, '../../../frontend/dist')
+    ];
+    const staticDir = candidateDirs.find((dir) => fs.existsSync(dir));
+
+    if (staticDir) {
+      await app.register(fastifyStatic, {
+        root: staticDir,
+        prefix: '/',
+        wildcard: false
+      });
+
+      // Client-side SPA routing fallback for non-API requests
+      app.setNotFoundHandler((request, reply) => {
+        if (request.raw.url && request.raw.url.startsWith('/api')) {
+          reply.status(404).send(createErrorResponse('INVALID_REQUEST', 'API endpoint not found'));
+        } else {
+          reply.sendFile('index.html');
+        }
+      });
+    }
+  }
 
   return app;
 }

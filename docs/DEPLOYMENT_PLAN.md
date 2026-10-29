@@ -115,4 +115,10 @@ CMD ["node", "backend/dist/index.js"]
 | `HOST` | `0.0.0.0` | Container bind address |
 | `RATE_LIMIT_MAX` | `30` | Per-IP requests per minute |
 | `ALLOWED_HOSTNAMES` | `instagram.com,www.instagram.com,cdninstagram.com,instagr.am` | Upstream SSRF allowlist |
-| `DEFAULT_PROVIDER` | `mock` | Active resolution engine |
+| `DEFAULT_PROVIDER` | `mock` or `oembed` | Active resolution engine (`oembed` for live Meta API) |
+| `INSTAGRAM_APP_ID` | `your_app_id` | Meta Developer App ID (Required for `oembed` mode) |
+| `INSTAGRAM_CLIENT_TOKEN` | `your_client_token` | Meta Developer Client Token (Required for `oembed` mode) |
+| `INSTAGRAM_OEMBED_ACCESS_TOKEN` | `${app_id}\|${client_token}` | Optional direct composite App Access Token |
+| `RESOLVER_TIMEOUT_MS` | `10000` | Upstream provider timeout in milliseconds |
+| `MAX_RESPONSE_SIZE_BYTES` | `52428800` | Max upstream response size (50MB) |
+| `CORS_ORIGIN` | `https://your-frontend.github.io` | Allowed frontend origin(s) |

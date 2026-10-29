@@ -18,8 +18,8 @@ describe('Snapora Backend API & Security Suite', () => {
     await app.close();
   });
 
-  describe('GET /api/health', () => {
-    it('returns service health status', async () => {
+  describe('GET /health and GET /api/health', () => {
+    it('returns service health status on /api/health', async () => {
       const response = await app.inject({
         method: 'GET',
         url: '/api/health'
@@ -29,6 +29,20 @@ describe('Snapora Backend API & Security Suite', () => {
       const json = response.json();
       expect(json.ok).toBe(true);
       expect(json.service).toBe('snapora-backend');
+      expect(json.status).toBe('healthy');
+    });
+
+    it('returns service health status on /health for cloud load balancers', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const json = response.json();
+      expect(json.ok).toBe(true);
+      expect(json.service).toBe('snapora-backend');
+      expect(json.status).toBe('healthy');
     });
   });
 
