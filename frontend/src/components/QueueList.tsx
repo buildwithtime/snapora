@@ -20,7 +20,7 @@ export const QueueList: React.FC = () => {
           Queue is Empty
         </h3>
         <p style={{ fontSize: '0.85rem', maxWidth: '420px', margin: '0 auto', color: 'var(--text-muted)' }}>
-          Paste public Instagram post or reel links into the box above or click &quot;Load Sample URLs&quot; to test sequential queue processing.
+          Paste public Instagram post, Reel, or carousel links into the box above to begin sequential queue processing.
         </p>
       </div>
     );

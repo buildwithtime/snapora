@@ -6,10 +6,32 @@ export const Header: React.FC = () => {
 
   const activeJob = state.jobs.find((j) => j.status === 'fetching');
   const queuedCount = state.jobs.filter((j) => j.status === 'queued').length;
+  const showStatusBadge = state.isPaused || Boolean(activeJob) || queuedCount > 0;
 
   return (
-    <header style={{ marginBottom: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+    <header
+      style={{
+        marginBottom: '2rem',
+        display: 'flex',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        flexWrap: 'wrap',
+        gap: '1rem'
+      }}
+    >
+      <a
+        href="/"
+        aria-label="Snapora Home"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '1rem',
+          textDecoration: 'none',
+          color: 'inherit',
+          borderRadius: '12px',
+          outlineOffset: '4px'
+        }}
+      >
         <div
           style={{
             width: '46px',
@@ -20,90 +42,76 @@ export const Header: React.FC = () => {
             alignItems: 'center',
             justifyContent: 'center',
             boxShadow: 'var(--accent-glow)',
-            fontSize: '1.4rem'
+            fontSize: '1.4rem',
+            flexShrink: 0
           }}
+          aria-hidden="true"
         >
           ⚡
         </div>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-            <h1 style={{ fontSize: '1.75rem', fontWeight: 800, letterSpacing: '-0.02em', background: 'linear-gradient(to right, #ffffff, #cbd5e1)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+            <h1
+              style={{
+                fontSize: '1.75rem',
+                fontWeight: 800,
+                letterSpacing: '-0.02em',
+                background: 'linear-gradient(to right, #ffffff, #cbd5e1)',
+                WebkitBackgroundClip: 'text',
+                WebkitTextFillColor: 'transparent',
+                margin: 0
+              }}
+            >
               Snapora
             </h1>
-            <span
-              style={{
-                fontSize: '0.7rem',
-                fontWeight: 700,
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-                padding: '0.2rem 0.5rem',
-                borderRadius: '4px',
-                background: 'rgba(99, 102, 241, 0.15)',
-                color: '#a5b4fc',
-                border: '1px solid rgba(99, 102, 241, 0.3)'
-              }}
-            >
-              Open Source v0.1
-            </span>
-            <span
-              style={{
-                fontSize: '0.7rem',
-                fontWeight: 600,
-                padding: '0.2rem 0.5rem',
-                borderRadius: '4px',
-                background: import.meta.env.VITE_DEMO_MODE === 'true' ? 'rgba(245, 158, 11, 0.12)' : 'rgba(16, 185, 129, 0.12)',
-                color: import.meta.env.VITE_DEMO_MODE === 'true' ? '#fcd34d' : '#6ee7b7',
-                border: import.meta.env.VITE_DEMO_MODE === 'true' ? '1px solid rgba(245, 158, 11, 0.25)' : '1px solid rgba(16, 185, 129, 0.25)'
-              }}
-            >
-              {import.meta.env.VITE_DEMO_MODE === 'true' ? 'Demo Mode (Simulated)' : 'Live Mode'}
-            </span>
           </div>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
-            Sequential, privacy-focused media queue engine with IndexedDB persistence
+          <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', margin: '0.2rem 0 0 0' }}>
+            Fast, private Instagram media downloader
           </p>
         </div>
-      </div>
+      </a>
 
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.6rem',
-          padding: '0.5rem 0.9rem',
-          borderRadius: '20px',
-          background: 'rgba(255, 255, 255, 0.04)',
-          border: '1px solid var(--border-subtle)',
-          fontSize: '0.82rem'
-        }}
-      >
+      {showStatusBadge && (
         <div
           style={{
-            width: '8px',
-            height: '8px',
-            borderRadius: '50%',
-            background: state.isPaused
-              ? 'var(--status-queued)'
-              : activeJob
-              ? 'var(--status-fetching)'
-              : 'var(--status-ready)',
-            boxShadow: state.isPaused
-              ? '0 0 8px var(--status-queued)'
-              : activeJob
-              ? '0 0 10px var(--status-fetching)'
-              : '0 0 8px var(--status-ready)'
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            padding: '0.5rem 0.9rem',
+            borderRadius: '20px',
+            background: 'rgba(255, 255, 255, 0.04)',
+            border: '1px solid var(--border-subtle)',
+            fontSize: '0.82rem'
           }}
-        />
-        <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>
-          {state.isPaused
-            ? 'Queue Paused'
-            : activeJob
-            ? `Resolving shortcode ${activeJob.shortcode}...`
-            : queuedCount > 0
-            ? `${queuedCount} in queue`
-            : 'Engine Idle'}
-        </span>
-      </div>
+          role="status"
+          aria-live="polite"
+        >
+          <div
+            style={{
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              background: state.isPaused
+                ? 'var(--status-queued)'
+                : activeJob
+                ? 'var(--status-fetching)'
+                : 'var(--status-ready)',
+              boxShadow: state.isPaused
+                ? '0 0 8px var(--status-queued)'
+                : activeJob
+                ? '0 0 10px var(--status-fetching)'
+                : '0 0 8px var(--status-ready)'
+            }}
+          />
+          <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>
+            {state.isPaused
+              ? 'Queue Paused'
+              : activeJob
+              ? `Resolving ${activeJob.shortcode}...`
+              : `${queuedCount} in queue`}
+          </span>
+        </div>
+      )}
     </header>
   );
 };

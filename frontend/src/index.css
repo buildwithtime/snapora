@@ -261,3 +261,33 @@ body {
   border-color: rgba(255, 255, 255, 0.6);
 }
 
+/* Accessibility: Clear Visible Keyboard Focus */
+:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+/* Accessibility: Respect User's Reduced Motion Preferences */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Mobile Responsive Adjustments */
+@media (max-width: 640px) {
+  .container {
+    padding: 1.25rem 1rem 3rem;
+  }
+  
+  .btn {
+    min-height: 40px;
+  }
+}
+
+

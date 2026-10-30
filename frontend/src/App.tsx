@@ -10,14 +10,16 @@ import { SecurityBanner } from './components/SecurityBanner.js';
 export const App: React.FC = () => {
   return (
     <QueueProvider>
-      <main className="container">
+      <div className="container">
         <Header />
-        <StatsBar />
-        <UrlInputSection />
-        <QueueControls />
-        <QueueList />
+        <main>
+          <UrlInputSection />
+          <StatsBar />
+          <QueueControls />
+          <QueueList />
+        </main>
         <SecurityBanner />
-      </main>
+      </div>
     </QueueProvider>
   );
 };

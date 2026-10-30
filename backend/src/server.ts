@@ -80,16 +80,27 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
         prefix: '/',
         wildcard: false
       });
-
-      // Client-side SPA routing fallback for non-API requests
-      app.setNotFoundHandler((request, reply) => {
-        if (request.raw.url && request.raw.url.startsWith('/api')) {
-          reply.status(404).send(createErrorResponse('INVALID_REQUEST', 'API endpoint not found'));
-        } else {
-          reply.sendFile('index.html');
-        }
-      });
     }
+
+    // Client-side SPA routing fallback and guaranteed JSON 404 for all /api endpoints
+    app.setNotFoundHandler((request, reply) => {
+      const reqUrl = request.raw.url || request.url || '';
+      const isApi = reqUrl.startsWith('/api');
+      const isGetOrHead = request.method === 'GET' || request.method === 'HEAD';
+
+      if (isApi) {
+        reply.status(404).send(createErrorResponse('INVALID_REQUEST', 'API endpoint not found'));
+      } else if (isGetOrHead && staticDir) {
+        reply.sendFile('index.html');
+      } else {
+        reply.status(404).send(createErrorResponse('INVALID_REQUEST', 'Resource not found'));
+      }
+    });
+  } else {
+    // When static serving is disabled, ensure /api 404 still returns structured JSON
+    app.setNotFoundHandler((request, reply) => {
+      reply.status(404).send(createErrorResponse('INVALID_REQUEST', 'API endpoint not found'));
+    });
   }
 
   return app;

@@ -5,55 +5,115 @@ export const StatsBar: React.FC = () => {
   const { state } = useQueue();
 
   const total = state.jobs.length;
+  if (total === 0) {
+    return null;
+  }
+
   const queued = state.jobs.filter((j) => j.status === 'queued').length;
   const processing = state.jobs.filter((j) => j.status === 'fetching' || j.status === 'validating').length;
-  const ready = state.jobs.filter((j) => j.status === 'ready').length;
+  const ready = state.jobs.filter((j) => j.status === 'ready' || j.status === 'preview_ready').length;
   const failed = state.jobs.filter((j) => j.status === 'failed').length;
-
-  const stats = [
-    { label: 'Total Jobs', count: total, color: 'var(--text-main)', border: 'var(--border-subtle)' },
-    { label: 'In Queue', count: queued, color: 'var(--status-queued)', border: 'rgba(245, 158, 11, 0.25)' },
-    { label: 'Processing', count: processing, color: 'var(--status-fetching)', border: 'rgba(6, 182, 212, 0.25)' },
-    { label: 'Ready', count: ready, color: 'var(--status-ready)', border: 'rgba(16, 185, 129, 0.25)' },
-    { label: 'Failed', count: failed, color: 'var(--status-failed)', border: 'rgba(244, 63, 94, 0.25)' }
-  ];
 
   return (
     <div
+      role="status"
+      aria-label="Queue Summary"
+      className="glass-panel"
       style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
-        gap: '1rem',
-        marginBottom: '2rem'
+        padding: '0.65rem 1rem',
+        marginBottom: '1rem',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '0.6rem',
+        fontSize: '0.82rem',
+        border: '1px solid var(--border-subtle)',
+        borderRadius: 'var(--radius-sm)'
       }}
     >
-      {stats.map((s, idx) => (
-        <div
-          key={idx}
-          className="glass-panel"
-          style={{
-            padding: '1.1rem 1.25rem',
-            border: `1px solid ${s.border}`,
-            display: 'flex',
-            flexDirection: 'column',
-            justifyContent: 'space-between'
-          }}
-        >
-          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
-            {s.label}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        <span style={{ fontWeight: 700, color: 'var(--text-main)' }}>
+          Downloads · {total} {total === 1 ? 'item' : 'items'}
+        </span>
+      </div>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.45rem',
+          flexWrap: 'wrap'
+        }}
+        aria-live="polite"
+      >
+        {ready > 0 && (
+          <span
+            style={{
+              padding: '0.15rem 0.5rem',
+              borderRadius: '12px',
+              background: 'rgba(16, 185, 129, 0.12)',
+              color: 'var(--status-ready)',
+              border: '1px solid rgba(16, 185, 129, 0.25)',
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.3rem'
+            }}
+          >
+            ✓ {ready} ready
           </span>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.5rem', marginTop: '0.4rem' }}>
-            <span style={{ fontSize: '1.75rem', fontWeight: 800, color: s.color, lineHeight: 1 }}>
-              {s.count}
-            </span>
-            {s.label === 'Processing' && processing > 0 && (
-              <span className="animate-spin" style={{ display: 'inline-block', fontSize: '0.9rem' }}>
-                ⚙️
-              </span>
-            )}
-          </div>
-        </div>
-      ))}
+        )}
+
+        {processing > 0 && (
+          <span
+            style={{
+              padding: '0.15rem 0.5rem',
+              borderRadius: '12px',
+              background: 'rgba(6, 182, 212, 0.12)',
+              color: 'var(--status-fetching)',
+              border: '1px solid rgba(6, 182, 212, 0.25)',
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.3rem'
+            }}
+          >
+            <span className="animate-spin" style={{ display: 'inline-block' }}>⚙️</span>
+            {processing} resolving
+          </span>
+        )}
+
+        {queued > 0 && (
+          <span
+            style={{
+              padding: '0.15rem 0.5rem',
+              borderRadius: '12px',
+              background: 'rgba(245, 158, 11, 0.12)',
+              color: 'var(--status-queued)',
+              border: '1px solid rgba(245, 158, 11, 0.25)',
+              fontWeight: 600
+            }}
+          >
+            {queued} queued
+          </span>
+        )}
+
+        {failed > 0 && (
+          <span
+            style={{
+              padding: '0.15rem 0.5rem',
+              borderRadius: '12px',
+              background: 'rgba(244, 63, 94, 0.12)',
+              color: 'var(--status-failed)',
+              border: '1px solid rgba(244, 63, 94, 0.25)',
+              fontWeight: 600
+            }}
+          >
+            ✕ {failed} failed
+          </span>
+        )}
+      </div>
     </div>
   );
 };

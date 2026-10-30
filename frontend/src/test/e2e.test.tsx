@@ -21,7 +21,7 @@ describe('Snapora End-to-End & Scenario Validation Suite', () => {
 
     expect(screen.getByText('Snapora')).toBeDefined();
     expect(screen.getByText('Queue Jobs')).toBeDefined();
-    expect(screen.getByText('Add to Queue')).toBeDefined();
+    expect(screen.getByText('Fetch Media')).toBeDefined();
     expect(screen.getByText('Queue is Empty')).toBeDefined();
     expect(screen.getByText(/Concurrency: 1/)).toBeDefined();
   });
@@ -29,8 +29,8 @@ describe('Snapora End-to-End & Scenario Validation Suite', () => {
   it('Scenario 2, 3, 4, 5: User pastes batch URLs with valid, invalid, and duplicate links', async () => {
     render(<App />);
 
-    const textarea = screen.getByPlaceholderText(/https:\/\/www\.instagram\.com\/p/);
-    const addButton = screen.getByText('Add to Queue');
+    const textarea = screen.getByPlaceholderText(/Paste your Instagram link/i);
+    const addButton = screen.getByText('Fetch Media');
 
     const batchInput = [
       'https://www.instagram.com/p/VALID111/',
@@ -74,8 +74,8 @@ describe('Snapora End-to-End & Scenario Validation Suite', () => {
 
     render(<App />);
 
-    const textarea = screen.getByPlaceholderText(/https:\/\/www\.instagram\.com\/p/);
-    const addButton = screen.getByText('Add to Queue');
+    const textarea = screen.getByPlaceholderText(/Paste your Instagram link/i);
+    const addButton = screen.getByText('Fetch Media');
 
     fireEvent.change(textarea, {
       target: {
@@ -119,8 +119,8 @@ describe('Snapora End-to-End & Scenario Validation Suite', () => {
 
     render(<App />);
 
-    const textarea = screen.getByPlaceholderText(/https:\/\/www\.instagram\.com\/p/);
-    const addButton = screen.getByText('Add to Queue');
+    const textarea = screen.getByPlaceholderText(/Paste your Instagram link/i);
+    const addButton = screen.getByText('Fetch Media');
 
     fireEvent.change(textarea, {
       target: {
@@ -155,8 +155,8 @@ describe('Snapora End-to-End & Scenario Validation Suite', () => {
 
     expect(screen.getByText('▶ Resume Queue')).toBeDefined();
 
-    const textarea = screen.getByPlaceholderText(/https:\/\/www\.instagram\.com\/p/);
-    const addButton = screen.getByText('Add to Queue');
+    const textarea = screen.getByPlaceholderText(/Paste your Instagram link/i);
+    const addButton = screen.getByText('Fetch Media');
 
     fireEvent.change(textarea, {
       target: { value: 'https://www.instagram.com/p/PAUSED_JOB/' }
@@ -184,8 +184,8 @@ describe('Snapora End-to-End & Scenario Validation Suite', () => {
 
     render(<App />);
 
-    const textarea = screen.getByPlaceholderText(/https:\/\/www\.instagram\.com\/p/);
-    const addButton = screen.getByText('Add to Queue');
+    const textarea = screen.getByPlaceholderText(/Paste your Instagram link/i);
+    const addButton = screen.getByText('Fetch Media');
 
     fireEvent.change(textarea, {
       target: { value: 'https://www.instagram.com/p/RETRY_TARGET/' }
@@ -243,8 +243,8 @@ describe('Snapora End-to-End & Scenario Validation Suite', () => {
     const pauseBtn = screen.getByText('⏸ Pause Queue');
     fireEvent.click(pauseBtn);
 
-    const textarea = screen.getByPlaceholderText(/https:\/\/www\.instagram\.com\/p/);
-    const addButton = screen.getByText('Add to Queue');
+    const textarea = screen.getByPlaceholderText(/Paste your Instagram link/i);
+    const addButton = screen.getByText('Fetch Media');
 
     fireEvent.change(textarea, {
       target: { value: 'https://www.instagram.com/p/TO_BE_REMOVED/' }
@@ -265,8 +265,8 @@ describe('Snapora End-to-End & Scenario Validation Suite', () => {
 
     render(<App />);
 
-    const textarea = screen.getByPlaceholderText(/https:\/\/www\.instagram\.com\/p/);
-    const addButton = screen.getByText('Add to Queue');
+    const textarea = screen.getByPlaceholderText(/Paste your Instagram link/i);
+    const addButton = screen.getByText('Fetch Media');
 
     fireEvent.change(textarea, {
       target: { value: 'https://www.instagram.com/p/OFFLINE_TEST/' }
@@ -290,5 +290,45 @@ describe('Snapora End-to-End & Scenario Validation Suite', () => {
     buttons.forEach((btn) => {
       expect(btn.textContent).toBeTruthy();
     });
+  });
+
+  it('Scenario 19: User clicks "+ Add another link" to insert newline in single textarea and submits valid links', async () => {
+    render(<App />);
+
+    // Verify exactly ONE textarea element exists in the document
+    const textareas = screen.getAllByRole('textbox');
+    expect(textareas.length).toBe(1);
+    const textarea = textareas[0] as HTMLTextAreaElement;
+
+    // Verify "+ Add another link" button exists
+    const addAnotherLinkBtn = screen.getByText(/Add another link/i);
+    expect(addAnotherLinkBtn).toBeDefined();
+
+    // Type first URL
+    fireEvent.change(textarea, { target: { value: 'https://www.instagram.com/p/FIRST_URL/' } });
+    expect(textarea.value).toBe('https://www.instagram.com/p/FIRST_URL/');
+
+    // Click "+ Add another link"
+    fireEvent.click(addAnotherLinkBtn);
+    expect(textarea.value).toBe('https://www.instagram.com/p/FIRST_URL/\n');
+
+    // Type second URL with trailing empty lines
+    fireEvent.change(textarea, {
+      target: { value: 'https://www.instagram.com/p/FIRST_URL/\nhttps://www.instagram.com/reel/SECOND_URL/\n\n' }
+    });
+
+    // Still exactly ONE textarea element
+    expect(screen.getAllByRole('textbox').length).toBe(1);
+
+    // Fetch media (ignoring the trailing empty lines)
+    const fetchBtn = screen.getByText('Fetch Media');
+    fireEvent.click(fetchBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Added 2 URLs to queue/)).toBeDefined();
+    });
+
+    expect(screen.getByText('FIRST_URL')).toBeDefined();
+    expect(screen.getByText('SECOND_URL')).toBeDefined();
   });
 });

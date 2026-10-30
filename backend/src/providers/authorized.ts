@@ -132,7 +132,28 @@ export class AuthorizedAccountMediaProvider implements IMediaProvider {
         };
       }
 
-      const json = await response.json() as { data?: unknown[] };
+      let json: { data?: unknown[] } = {};
+      try {
+        if (typeof response.text === 'function') {
+          const rawText = await response.text();
+          if (rawText.trim()) {
+            json = JSON.parse(rawText) as { data?: unknown[] };
+          }
+        } else if (typeof (response as any).json === 'function') {
+          json = await (response as any).json();
+        }
+      } catch {
+        return {
+          ok: false,
+          status: 'provider_error',
+          provider: this.name,
+          shortcode,
+          error: {
+            code: 'PROVIDER_ERROR',
+            message: 'Received invalid response payload from Meta Graph API'
+          }
+        };
+      }
       const items = Array.isArray(json.data) ? json.data : [];
 
       // Find the item matching shortcode in permalink

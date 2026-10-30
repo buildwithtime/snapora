@@ -143,8 +143,11 @@ export async function fetchValidatedMediaBlob(
     if (!response.ok) {
       let errMsg = `Proxy fetch failed with HTTP ${response.status}`;
       try {
-        const errJson = await response.json();
-        errMsg = errJson.error?.message || errMsg;
+        const raw = await response.text();
+        if (raw.trim()) {
+          const parsed = JSON.parse(raw);
+          errMsg = parsed.error?.message || errMsg;
+        }
       } catch {
         // Fallback to HTTP error
       }
@@ -322,6 +325,9 @@ export async function buildAndDownloadZip(options: BuildZipOptions): Promise<Zip
       completed++;
       onItemStatus?.(jobId, itemId, 'completed');
     } catch (err: unknown) {
+      if (signal?.aborted || (err as { name?: string })?.name === 'AbortError') {
+        break;
+      }
       failed++;
       failedItemIds.push(itemId);
       const errMsg = err instanceof Error ? err.message : 'Media fetch failed';

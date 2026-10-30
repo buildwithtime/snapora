@@ -185,7 +185,7 @@ describe('Queue State Machine Transitions', () => {
     expect(removed.activeJobId).toBeNull();
   });
 
-  it('handles CLEAR_COMPLETED preserving queued and fetching jobs', () => {
+  it('handles CLEAR_COMPLETED removing only completed jobs and not silently removing failed items', () => {
     const mixedState: QueueState = {
       jobs: [
         { id: '1', url: '1', normalizedUrl: '1', shortcode: '1', status: 'ready', createdAt: 1, retryCount: 0 },
@@ -198,7 +198,23 @@ describe('Queue State Machine Transitions', () => {
     };
 
     const cleared = queueReducer(mixedState, { type: 'CLEAR_COMPLETED' });
-    expect(cleared.jobs.map((j) => j.id)).toEqual(['3', '4']);
+    // Only completed job '1' (ready) is cleared. Failed ('2'), queued ('3'), fetching ('4') are preserved.
+    expect(cleared.jobs.map((j) => j.id)).toEqual(['2', '3', '4']);
+  });
+
+  it('handles CLEAR_FAILED removing only failed jobs', () => {
+    const mixedState: QueueState = {
+      jobs: [
+        { id: '1', url: '1', normalizedUrl: '1', shortcode: '1', status: 'ready', createdAt: 1, retryCount: 0 },
+        { id: '2', url: '2', normalizedUrl: '2', shortcode: '2', status: 'failed', createdAt: 2, retryCount: 0 },
+        { id: '3', url: '3', normalizedUrl: '3', shortcode: '3', status: 'queued', createdAt: 3, retryCount: 0 }
+      ],
+      isPaused: false,
+      activeJobId: null
+    };
+
+    const cleared = queueReducer(mixedState, { type: 'CLEAR_FAILED' });
+    expect(cleared.jobs.map((j) => j.id)).toEqual(['1', '3']);
   });
 
   it('handles HYDRATE_STATE and resets activeJobId', () => {

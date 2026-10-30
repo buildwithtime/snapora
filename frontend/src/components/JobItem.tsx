@@ -247,87 +247,130 @@ export const JobItem: React.FC<JobItemProps> = ({ job }) => {
         </div>
       </div>
 
-      {/* Error state display with classified actionable guidance */}
-      {job.status === 'failed' && job.error && (
-        <div
-          style={{
-            padding: '0.85rem 1rem',
-            borderRadius: 'var(--radius-sm)',
-            background: 'rgba(244, 63, 94, 0.08)',
-            border: '1px solid rgba(244, 63, 94, 0.25)',
-            color: '#fb7185',
-            fontSize: '0.82rem',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '0.45rem'
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span style={{ fontWeight: 700 }}>⚠️ {job.error.code}:</span>
-            <span>{job.error.message}</span>
+      {/* Error state display with user-friendly actionable guidance */}
+      {job.status === 'failed' && job.error && (() => {
+        const getFriendlyError = (err: { code: string; message: string }) => {
+          switch (err.code) {
+            case 'UNSUPPORTED_URL':
+            case 'INVALID_URL':
+              return {
+                title: 'Invalid Instagram Link',
+                detail: 'Please enter a valid public Instagram post, Reel, or carousel URL.'
+              };
+            case 'UNSUPPORTED_CONTENT':
+              return {
+                title: 'Unsupported Content',
+                detail: "This type of Instagram content isn't supported yet."
+              };
+            case 'HTTP_429_RATE_LIMITED':
+            case 'RATE_LIMITED':
+              return {
+                title: 'Temporarily Rate Limited',
+                detail: 'Instagram is temporarily limiting requests. Please try again later.'
+              };
+            case 'TIMEOUT':
+              return {
+                title: 'Request Timed Out',
+                detail: 'The request took too long. You can try again.'
+              };
+            case 'CONTENT_UNAVAILABLE':
+            case 'NO_MEDIA':
+              return {
+                title: 'No Downloadable Media Found',
+                detail: "We couldn't find downloadable media for this post."
+              };
+            case 'MALFORMED_RESPONSE':
+            case 'INCOMPLETE_RESPONSE':
+              return {
+                title: 'Incomplete Response',
+                detail: 'We received an incomplete response. Please try again.'
+              };
+            case 'NETWORK_ERROR':
+              return {
+                title: 'Connection Interrupted',
+                detail: err.message?.includes('refused')
+                  ? err.message
+                  : 'Connection interrupted. Please check your connection and retry.'
+              };
+            case 'DOWNLOAD_INTERRUPTED':
+              return {
+                title: 'Download Interrupted',
+                detail: 'The download was interrupted. Please retry.'
+              };
+            case 'SERVER_UNAVAILABLE':
+            case 'SERVICE_UNAVAILABLE':
+              return {
+                title: 'Service Unavailable',
+                detail: 'The upstream media service is temporarily unavailable. Please try again.'
+              };
+            case 'CONTENT_PRIVATE':
+            case 'PRIVATE_ACCOUNT':
+            case 'LOGIN_WALL_ENCOUNTERED':
+            case 'HTTP_403_FORBIDDEN':
+              return {
+                title: 'Private or Restricted Post',
+                detail: 'This post belongs to a private account or requires an Instagram login.'
+              };
+            case 'MEDIA_VALIDATION_FAILED':
+              return {
+                title: 'Media Verification Failed',
+                detail: 'The retrieved data could not be verified as a valid image or video file.'
+              };
+            case 'PROVIDER_NOT_CONFIGURED':
+              return {
+                title: 'Preview Service Unavailable',
+                detail: 'The upstream preview provider is not configured.'
+              };
+            case 'AUTHENTICATION_REQUIRED':
+            case 'AUTHENTICATION_ERROR':
+              return {
+                title: 'Account Authorization Required',
+                detail: 'Access to this content requires authorized account permissions.'
+              };
+            case 'POST_NOT_FOUND':
+              return {
+                title: 'Post Not Found',
+                detail: 'The requested post or Reel could not be found. It may have been deleted or archived.'
+              };
+            default:
+              return {
+                title: 'Unable to Resolve Media',
+                detail: err.message || 'An unexpected error occurred while resolving this link.'
+              };
+          }
+        };
+
+        const friendly = getFriendlyError(job.error);
+
+        return (
+          <div
+            role="alert"
+            style={{
+              padding: '0.85rem 1rem',
+              borderRadius: 'var(--radius-sm)',
+              background: 'rgba(244, 63, 94, 0.08)',
+              border: '1px solid rgba(244, 63, 94, 0.25)',
+              color: '#fb7185',
+              fontSize: '0.82rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.35rem'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <span style={{ fontWeight: 700, color: '#fda4af' }}>⚠️ {friendly.title}</span>
+            </div>
+            <p style={{ margin: 0, fontSize: '0.78rem', color: '#fecdd3', lineHeight: 1.4 }}>
+              {friendly.detail}
+            </p>
+            {job.error.message && job.error.message !== friendly.detail && (
+              <span style={{ fontSize: '0.74rem', color: '#fda4af', opacity: 0.9 }}>
+                {job.error.message}
+              </span>
+            )}
           </div>
-
-          {job.error.code === 'PROVIDER_NOT_CONFIGURED' && (
-            <div style={{ fontSize: '0.76rem', color: '#fda4af', marginTop: '0.2rem', lineHeight: 1.4 }}>
-              💡 <strong>Configuration Missing:</strong> Supply <code>INSTAGRAM_APP_ID</code> and <code>INSTAGRAM_CLIENT_TOKEN</code> in your backend <code>.env</code> file for live previews, or switch to Demo Mode.
-            </div>
-          )}
-
-          {(job.error.code === 'AUTHENTICATION_REQUIRED' || job.error.code === 'AUTHENTICATION_ERROR') && (
-            <div style={{ fontSize: '0.76rem', color: '#fef08a', marginTop: '0.2rem', lineHeight: 1.4 }}>
-              🔑 <strong>Authentication Required:</strong> Meta Graph API requires an OAuth 2.0 User Access Token with <code>instagram_basic</code> scope for an Instagram Professional (Creator or Business) account.
-            </div>
-          )}
-
-          {job.error.code === 'CONTENT_UNAVAILABLE' && (
-            <div style={{ fontSize: '0.76rem', color: '#e2e8f0', marginTop: '0.2rem', lineHeight: 1.4 }}>
-              ℹ️ <strong>Scope Limitation:</strong> Meta Graph API only permits downloading media owned or managed by the authenticated account. Arbitrary third-party posts cannot be downloaded via Graph API.
-            </div>
-          )}
-
-          {(job.error.code === 'CONTENT_PRIVATE' || job.error.code === 'PRIVATE_ACCOUNT') && (
-            <div style={{ fontSize: '0.76rem', color: '#fed7aa', marginTop: '0.2rem', lineHeight: 1.4 }}>
-              🔒 <strong>Private Post:</strong> This Instagram post or account is private, or embedding has been disabled by the creator. Private content cannot be retrieved without authorization.
-            </div>
-          )}
-
-          {(job.error.code === 'UNSUPPORTED_URL' || job.error.code === 'INVALID_URL') && (
-            <div style={{ fontSize: '0.76rem', color: '#cbd5e1', marginTop: '0.2rem', lineHeight: 1.4 }}>
-              🔍 <strong>Format Guidance:</strong> Snapora supports standard Instagram post (<code>/p/...</code>), Reel (<code>/reel/...</code>), and verified Meta CDN URLs. Profiles and stories are unsupported.
-            </div>
-          )}
-
-          {job.error.code === 'MEDIA_VALIDATION_FAILED' && (
-            <div style={{ fontSize: '0.76rem', color: '#fda4af', marginTop: '0.2rem', lineHeight: 1.4 }}>
-              🛡️ <strong>Integrity Guard:</strong> The retrieved binary payload did not match genuine JPEG, MP4, or WebP file signatures, or was truncated.
-            </div>
-          )}
-
-          {job.error.code === 'HTTP_429_RATE_LIMITED' && (
-            <div style={{ fontSize: '0.76rem', color: '#fef08a', marginTop: '0.2rem', lineHeight: 1.4 }}>
-              ⏳ <strong>Upstream Rate Limited:</strong> Instagram web server temporarily limited requests from this IP. Please wait a moment before retrying.
-            </div>
-          )}
-
-          {job.error.code === 'HTTP_403_FORBIDDEN' && (
-            <div style={{ fontSize: '0.76rem', color: '#fed7aa', marginTop: '0.2rem', lineHeight: 1.4 }}>
-              🚫 <strong>Access Restricted:</strong> Instagram returned HTTP 403 Forbidden. The post may require a logged-in session or age-verification on Instagram.
-            </div>
-          )}
-
-          {job.error.code === 'POST_NOT_FOUND' && (
-            <div style={{ fontSize: '0.76rem', color: '#cbd5e1', marginTop: '0.2rem', lineHeight: 1.4 }}>
-              🔍 <strong>Post Unavailable:</strong> The requested post or reel could not be found. It may have been deleted, archived, or is inaccessible.
-            </div>
-          )}
-
-          {job.error.code === 'LOGIN_WALL_ENCOUNTERED' && (
-            <div style={{ fontSize: '0.76rem', color: '#fed7aa', marginTop: '0.2rem', lineHeight: 1.4 }}>
-              🔒 <strong>Login Wall:</strong> Instagram redirected this request to its login page. Public anonymous access is currently restricted for this URL.
-            </div>
-          )}
-        </div>
-      )}
+        );
+      })()}
 
       {/* Live Preview Mode Display (oEmbed Embed / Thumbnail Preview) */}
       {job.status === 'preview_ready' && (
@@ -382,7 +425,7 @@ export const JobItem: React.FC<JobItemProps> = ({ job }) => {
               color: 'var(--text-secondary)'
             }}
           >
-            🛡️ <strong>Official Live Preview Notice:</strong> {job.disclaimer || 'Meta public oEmbed API supplies embed and thumbnail metadata, but does not provide direct downloadable video or raw media files.'}
+            🛡️ <strong>Official Preview Notice:</strong> {job.disclaimer || 'Meta public oEmbed API supplies embed and thumbnail metadata, but does not provide direct downloadable video or raw media files.'}
           </div>
 
           <div style={{ display: 'flex', gap: '0.5rem' }}>

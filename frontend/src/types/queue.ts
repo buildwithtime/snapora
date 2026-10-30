@@ -153,6 +153,7 @@ export type QueueAction =
   | { type: 'RETRY_JOB'; payload: { jobId: string } }
   | { type: 'REMOVE_JOB'; payload: { jobId: string } }
   | { type: 'CLEAR_COMPLETED' }
+  | { type: 'CLEAR_FAILED' }
   | { type: 'HYDRATE_STATE'; payload: { jobs: QueueJob[] } }
   | {
       type: 'SET_ITEM_DOWNLOAD_STATUS';

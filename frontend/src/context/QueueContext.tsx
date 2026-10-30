@@ -1,10 +1,12 @@
 import React, { createContext, useContext, useReducer, useEffect, useRef, useState } from 'react';
-import { QueueJob, QueueState, QueueAction, MediaItem, CarouselItem, DownloadMode } from '../types/queue.js';
+import { QueueJob, QueueState, QueueAction, MediaItem, CarouselItem, DownloadMode, ResolutionStatus, PreviewData } from '../types/queue.js';
 import { parseBatchUrls } from '../utils/urlValidator.js';
 import { saveJobsToStorage, loadJobsFromStorage } from '../utils/storage.js';
 import { resolveClientMock } from '../utils/mockResolver.js';
 import { generateMediaFilename, FilenameCollisionTracker } from '../utils/filenameGenerator.js';
 import { buildAndDownloadZip } from '../utils/zipDownloader.js';
+import { addRecentDownload } from '../utils/recentHistory.js';
+import { safeFetchJson } from '../utils/apiClient.js';
 
 interface QueueContextType {
   state: QueueState;
@@ -18,6 +20,7 @@ interface QueueContextType {
   retryJob: (jobId: string) => void;
   removeJob: (jobId: string) => void;
   clearCompleted: () => void;
+  clearFailed: () => void;
   triggerDownload: (media: MediaItem) => void;
   downloadMediaItem: (jobId: string, item: MediaItem | CarouselItem) => Promise<boolean>;
   downloadAll: (jobId?: string, options?: { retryFailedOnly?: boolean; mode?: DownloadMode }) => Promise<void>;
@@ -168,7 +171,13 @@ export function queueReducer(state: QueueState, action: QueueAction): QueueState
     case 'CLEAR_COMPLETED':
       return {
         ...state,
-        jobs: state.jobs.filter((job) => job.status === 'queued' || job.status === 'fetching')
+        jobs: state.jobs.filter((job) => job.status !== 'ready' && job.status !== 'preview_ready')
+      };
+
+    case 'CLEAR_FAILED':
+      return {
+        ...state,
+        jobs: state.jobs.filter((job) => job.status !== 'failed')
       };
 
     case 'SET_ITEM_DOWNLOAD_STATUS':
@@ -350,6 +359,13 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               mockResult.author,
               nextJob.shortcode
             );
+            addRecentDownload({
+              id: nextJob.id,
+              url: nextJob.normalizedUrl,
+              shortcode: nextJob.shortcode,
+              author: mockResult.author,
+              title: mockResult.title
+            });
             dispatch({
               type: 'JOB_SUCCESS',
               payload: {
@@ -379,13 +395,29 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           return;
         }
 
-        // Standard backend resolution
+        // Standard backend resolution via safe API client
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
         if (userAccessToken) {
           headers['Authorization'] = `Bearer ${userAccessToken}`;
         }
 
-        const response = await fetch(`${apiBaseUrl}/api/resolve`, {
+        const apiResult = await safeFetchJson<{
+          ok: boolean;
+          status?: ResolutionStatus;
+          provider?: string;
+          downloadAvailable?: boolean;
+          disclaimer?: string;
+          preview?: PreviewData;
+          media?: MediaItem[];
+          carouselItems?: CarouselItem[];
+          title?: string;
+          author?: string;
+          takenAt?: number | string;
+          error?: {
+            code: string;
+            message: string;
+          };
+        }>(`${apiBaseUrl}/api/resolve`, {
           method: 'POST',
           headers,
           body: JSON.stringify({
@@ -395,9 +427,22 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           signal: controller.signal
         });
 
-        const data = await response.json();
+        if (!apiResult.ok) {
+          dispatch({
+            type: 'JOB_FAILURE',
+            payload: {
+              jobId: nextJob.id,
+              code: apiResult.error.code,
+              message: apiResult.error.message,
+              resolutionStatus: 'provider_error'
+            }
+          });
+          return;
+        }
 
-        if (response.ok && data.ok) {
+        const data = apiResult.data;
+
+        if (data.ok) {
           const { media, carouselItems } = applyStandardFilenames(
             data.media,
             data.carouselItems,
@@ -405,6 +450,13 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             nextJob.shortcode,
             data.takenAt
           );
+          addRecentDownload({
+            id: nextJob.id,
+            url: nextJob.normalizedUrl,
+            shortcode: nextJob.shortcode,
+            author: data.author,
+            title: data.title
+          });
           dispatch({
             type: 'JOB_SUCCESS',
             payload: {
@@ -433,12 +485,12 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           });
         }
       } catch (err: unknown) {
-        if (err instanceof DOMException && err.name === 'AbortError') {
+        if ((err instanceof DOMException && err.name === 'AbortError') || (err as { name?: string })?.name === 'AbortError') {
           // Job was cancelled by user
           return;
         }
 
-        const errorMessage = err instanceof Error ? err.message : 'Network connection failed';
+        const errorMessage = err instanceof Error ? err.message : 'Connection interrupted. Please check your connection and retry.';
         dispatch({
           type: 'JOB_FAILURE',
           payload: {
@@ -492,6 +544,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   const clearCompleted = () => dispatch({ type: 'CLEAR_COMPLETED' });
+  const clearFailed = () => dispatch({ type: 'CLEAR_FAILED' });
 
   const triggerDownload = (media: MediaItem) => {
     const link = document.createElement('a');
@@ -545,8 +598,11 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (!response.ok) {
           let errMsg = `Download failed with HTTP ${response.status}`;
           try {
-            const errJson = await response.json();
-            errMsg = errJson.error?.message || errMsg;
+            const raw = await response.text();
+            if (raw.trim()) {
+              const parsed = JSON.parse(raw);
+              errMsg = parsed.error?.message || errMsg;
+            }
           } catch {
             // fallback
           }
@@ -805,6 +861,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         retryJob,
         removeJob,
         clearCompleted,
+        clearFailed,
         triggerDownload,
         downloadMediaItem,
         downloadAll,

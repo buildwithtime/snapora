@@ -7,6 +7,7 @@ export const QueueControls: React.FC = () => {
     pauseQueue,
     resumeQueue,
     clearCompleted,
+    clearFailed,
     downloadAll,
     cancelDownloadAll,
     downloadMode,
@@ -44,8 +45,9 @@ export const QueueControls: React.FC = () => {
   }, [isDropdownOpen]);
 
   const hasCompleted = state.jobs.some(
-    (j) => j.status === 'ready' || j.status === 'failed' || j.status === 'preview_ready'
+    (j) => j.status === 'ready' || j.status === 'preview_ready'
   );
+  const hasFailedJobs = state.jobs.some((j) => j.status === 'failed');
 
   // Compute downloadable items across all resolved jobs
   const resolvedJobs = state.jobs.filter(
@@ -328,6 +330,12 @@ export const QueueControls: React.FC = () => {
           {hasCompleted && (
             <button type="button" onClick={clearCompleted} className="btn btn-secondary btn-sm">
               Clear Completed
+            </button>
+          )}
+
+          {hasFailedJobs && (
+            <button type="button" onClick={clearFailed} className="btn btn-outline-danger btn-sm" style={{ fontSize: '0.78rem' }}>
+              Clear Failed
             </button>
           )}
         </div>
