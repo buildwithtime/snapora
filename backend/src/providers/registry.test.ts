@@ -51,4 +51,14 @@ describe('ProviderCapabilityRegistry Suite', () => {
     const provider = registry.selectProviderForUrl('https://www.instagram.com/p/Cxyz123/');
     expect(provider.id).toBe('mock');
   });
+
+  it('selects provider for profile discovery based on preference or capabilities', () => {
+    const registry = new ProviderCapabilityRegistry();
+    const mockPreferred = registry.selectProviderForProfile('https://www.instagram.com/creator/', 'mock');
+    expect(mockPreferred.id).toBe('mock');
+
+    const defaultProfileProvider = registry.selectProviderForProfile('https://www.instagram.com/creator/');
+    expect(defaultProfileProvider).toBeDefined();
+    expect(defaultProfileProvider.canDiscoverProfile).toBeDefined();
+  });
 });

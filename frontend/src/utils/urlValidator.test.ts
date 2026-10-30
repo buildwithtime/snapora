@@ -163,5 +163,18 @@ describe('Frontend URL Validator', () => {
     expect(res.mediaType).toBe('direct_media');
     expect(res.directMediaInfo?.extension).toBe('mp4');
   });
+
+  it('identifies valid Instagram profile URLs', () => {
+    const res = parseInstagramUrl('https://www.instagram.com/nature.photographer/');
+    expect(res.valid).toBe(true);
+    expect(res.mediaType).toBe('profile');
+    expect(res.username).toBe('nature.photographer');
+    expect(res.normalizedUrl).toBe('https://www.instagram.com/nature.photographer/');
+  });
+
+  it('rejects reserved system paths in profile detection', () => {
+    expect(parseInstagramUrl('https://www.instagram.com/explore/').valid).toBe(false);
+    expect(parseInstagramUrl('https://www.instagram.com/accounts/').valid).toBe(false);
+  });
 });
 

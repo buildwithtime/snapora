@@ -19,6 +19,14 @@ describe('PublicWebMediaProvider Suite', () => {
     expect(caps.supportsCarousel).toBe(true);
     expect(caps.requiresAuthentication).toBe(false);
     expect(caps.requiresConfiguration).toBe(false);
+    expect(caps.supportsProfileDiscovery).toBe(true);
+  });
+
+  it('identifies eligible profile URLs and handles', () => {
+    expect(provider.canDiscoverProfile('https://www.instagram.com/natgeo/')).toBe(true);
+    expect(provider.canDiscoverProfile('natgeo')).toBe(true);
+    expect(provider.canDiscoverProfile('@natgeo')).toBe(true);
+    expect(provider.canDiscoverProfile('invalid..user')).toBe(false);
   });
 
   it('identifies eligible Instagram post and reel URLs', () => {

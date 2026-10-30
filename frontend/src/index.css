@@ -288,6 +288,15 @@ body {
   .btn {
     min-height: 40px;
   }
+
+  .profile-header-container {
+    padding: 1.25rem !important;
+  }
 }
 
+/* Profile Gallery Styling */
+.profile-header-container {
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
 

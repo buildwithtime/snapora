@@ -1,9 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useQueue } from '../context/QueueContext.js';
+import { useProfileGallery } from '../context/ProfileGalleryContext.js';
 import { getRecentDownloads, clearRecentDownloads, RecentDownloadItem } from '../utils/recentHistory.js';
+import { parseInstagramUrl } from '../utils/urlValidator.js';
 
 export const UrlInputSection: React.FC = () => {
   const { addUrls, userAccessToken, setUserAccessToken, state } = useQueue();
+  const { loadProfile } = useProfileGallery();
   const [inputText, setInputText] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -55,10 +58,42 @@ export const UrlInputSection: React.FC = () => {
     e.preventDefault();
     if (!inputText.trim()) return;
 
+    const lines = inputText
+      .split(/(?:\r?\n|,|\s)+/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+
+    // Profile URL check
+    const profileLines = lines.filter((line) => {
+      const parsed = parseInstagramUrl(line);
+      return parsed.valid && parsed.mediaType === 'profile';
+    });
+
+    if (profileLines.length > 0 && profileLines.length === lines.length) {
+      const firstParsed = parseInstagramUrl(profileLines[0]);
+      loadProfile(profileLines[0]);
+      setFeedback({
+        message: `Discovered Instagram profile @${firstParsed.username || 'creator'}. Opening media gallery...`,
+        type: 'success'
+      });
+      setInputText('');
+      setTimeout(() => {
+        setFeedback(null);
+      }, 4500);
+      return;
+    }
+
+    if (profileLines.length > 0) {
+      loadProfile(profileLines[0]);
+    }
+
     const result = addUrls(inputText);
 
     if (result.addedCount > 0) {
       const parts = [`Added ${result.addedCount} URL${result.addedCount > 1 ? 's' : ''} to queue`];
+      if (profileLines.length > 0) {
+        parts.push(`(and opened profile gallery)`);
+      }
       if (result.duplicateCount > 0) {
         parts.push(`(${result.duplicateCount} duplicate${result.duplicateCount > 1 ? 's' : ''} skipped)`);
       }
@@ -72,9 +107,15 @@ export const UrlInputSection: React.FC = () => {
         message: `All ${result.duplicateCount} URL${result.duplicateCount > 1 ? 's' : ''} are already in queue`,
         type: 'warn'
       });
+    } else if (profileLines.length > 0) {
+      setFeedback({
+        message: 'Opened Instagram profile media gallery.',
+        type: 'success'
+      });
+      setInputText('');
     } else if (result.invalidCount > 0) {
       setFeedback({
-        message: 'No valid Instagram URLs recognized. Expected format: instagram.com/p/... or /reel/...',
+        message: 'No valid Instagram URLs recognized. Expected format: instagram.com/p/..., /reel/..., or /username/',
         type: 'error'
       });
     }

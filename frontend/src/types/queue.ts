@@ -82,7 +82,7 @@ export interface QueueJob {
   url: string;
   normalizedUrl: string;
   shortcode: string;
-  mediaType?: 'post' | 'reel' | 'tv' | 'direct_media';
+  mediaType?: 'post' | 'reel' | 'tv' | 'profile' | 'direct_media';
   status: JobStatus;
   resolutionStatus?: ResolutionStatus;
   createdAt: number;
@@ -128,7 +128,7 @@ export type QueueState = {
 };
 
 export type QueueAction =
-  | { type: 'ADD_JOBS'; payload: Array<{ url: string; normalizedUrl: string; shortcode: string; mediaType?: 'post' | 'reel' | 'tv' | 'direct_media' }> }
+  | { type: 'ADD_JOBS'; payload: Array<{ id?: string; url: string; normalizedUrl: string; shortcode: string; mediaType?: 'post' | 'reel' | 'tv' | 'profile' | 'direct_media' }> }
   | { type: 'START_JOB'; payload: { jobId: string } }
   | {
       type: 'JOB_SUCCESS';

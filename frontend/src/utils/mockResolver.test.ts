@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { resolveClientMock } from './mockResolver.js';
+import { resolveClientMock, discoverProfileClientMock } from './mockResolver.js';
 
 describe('Client-Side Mock Resolver Suite', () => {
   it('resolves photo fixture for standard shortcode', async () => {
@@ -33,5 +33,31 @@ describe('Client-Side Mock Resolver Suite', () => {
     const res = await resolveClientMock('error_shortcode');
     expect(res.ok).toBe(false);
     expect(res.error?.code).toBe('PROVIDER_ERROR');
+  });
+
+  it('discovers client mock profile with paginated media items', async () => {
+    const res = await discoverProfileClientMock('creator_demo');
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.profile.username).toBe('creator_demo');
+      expect(res.items.length).toBe(12);
+      expect(res.pagination.hasMore).toBe(true);
+      expect(res.pagination.nextCursor).toBe('cursor_page_2');
+    }
+
+    const page2 = await discoverProfileClientMock('creator_demo', 'cursor_page_2');
+    expect(page2.ok).toBe(true);
+    if (page2.ok) {
+      expect(page2.items.length).toBe(12);
+      expect(page2.pagination.hasMore).toBe(false);
+    }
+  });
+
+  it('handles private account error in client mock profile discovery', async () => {
+    const res = await discoverProfileClientMock('private_profile_user');
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('PRIVATE_ACCOUNT');
+    }
   });
 });

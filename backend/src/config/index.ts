@@ -13,6 +13,7 @@ export interface AppConfig {
   instagramClientToken?: string;
   instagramOembedAccessToken?: string;
   instagramUserAccessToken?: string;
+  instagramGraphApiVersion?: string;
 }
 
 export const config: AppConfig = {
@@ -33,7 +34,8 @@ export const config: AppConfig = {
   instagramAppId: process.env.INSTAGRAM_APP_ID?.trim() || undefined,
   instagramClientToken: process.env.INSTAGRAM_CLIENT_TOKEN?.trim() || undefined,
   instagramOembedAccessToken: process.env.INSTAGRAM_OEMBED_ACCESS_TOKEN?.trim() || undefined,
-  instagramUserAccessToken: process.env.INSTAGRAM_USER_ACCESS_TOKEN?.trim() || undefined
+  instagramUserAccessToken: process.env.INSTAGRAM_USER_ACCESS_TOKEN?.trim() || undefined,
+  instagramGraphApiVersion: process.env.INSTAGRAM_GRAPH_API_VERSION?.trim() || 'v21.0'
 };
 
 export interface ConfigValidationResult {

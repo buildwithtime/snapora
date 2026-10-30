@@ -242,6 +242,14 @@ export async function buildAndDownloadZip(options: BuildZipOptions): Promise<Zip
   }
 
   if (items.length > MAX_ZIP_ITEMS) {
+    onProgress?.({
+      phase: 'completed',
+      total: items.length,
+      completed: 0,
+      failed: items.length,
+      archiveName: '',
+      percent: 100
+    });
     return {
       success: false,
       archiveName: '',
@@ -316,7 +324,10 @@ export async function buildAndDownloadZip(options: BuildZipOptions): Promise<Zip
       const blob = await fetchValidatedMediaBlob(item, apiBaseUrl, isDemoMode, signal);
 
       if (totalBytes + blob.size > MAX_ZIP_TOTAL_BYTES) {
-        throw new Error(`Total archive size exceeds limit of 500 MB`);
+        failed++;
+        failedItemIds.push(itemId);
+        onItemStatus?.(jobId, itemId, 'failed', 'Total archive size exceeds limit of 500 MB');
+        break;
       }
 
       totalBytes += blob.size;

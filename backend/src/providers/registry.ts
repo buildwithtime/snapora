@@ -84,6 +84,35 @@ export class ProviderCapabilityRegistry {
 
     return this.getDefaultProvider();
   }
+
+  /**
+   * Selects a provider capable of profile-wide discovery.
+   * If a preferredProviderId is specified and available, selects it.
+   * Otherwise uses the default provider if it supports profile discovery,
+   * or falls back to public / mock.
+   */
+  selectProviderForProfile(urlOrUsername: string, preferredProviderId?: string): IMediaProvider {
+    if (preferredProviderId && this.providers.has(preferredProviderId)) {
+      return this.providers.get(preferredProviderId)!;
+    }
+
+    const defaultProvider = this.getDefaultProvider();
+    if (defaultProvider.canDiscoverProfile && defaultProvider.canDiscoverProfile(urlOrUsername)) {
+      return defaultProvider;
+    }
+
+    const publicProvider = this.providers.get('public');
+    if (publicProvider?.canDiscoverProfile && publicProvider.canDiscoverProfile(urlOrUsername)) {
+      return publicProvider;
+    }
+
+    const mockProvider = this.providers.get('mock');
+    if (mockProvider) {
+      return mockProvider;
+    }
+
+    return defaultProvider;
+  }
 }
 
 // Global shared registry instance

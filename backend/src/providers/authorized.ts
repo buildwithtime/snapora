@@ -1,4 +1,16 @@
-import { IMediaProvider, ResolveResult, ProviderCapabilities, CarouselItem, MediaItem, ResolveOptions } from './types.js';
+import {
+  IMediaProvider,
+  ResolveResult,
+  ProviderCapabilities,
+  CarouselItem,
+  MediaItem,
+  ResolveOptions,
+  ProfileDiscoveryResult,
+  ProfileDiscoveryOptions,
+  ProfileInfo,
+  ProfileMediaItem,
+  ProfileMediaChild
+} from './types.js';
 import { z } from 'zod';
 import { config } from '../config/index.js';
 import { parseRetryAfter, formatRateLimitMessage } from '../utils/errors.js';
@@ -50,7 +62,7 @@ export class AuthorizedAccountMediaProvider implements IMediaProvider {
 
   constructor(options?: AuthorizedAccountMediaProviderOptions) {
     this.userAccessToken = options?.userAccessToken;
-    this.graphApiVersion = options?.graphApiVersion || 'v21.0';
+    this.graphApiVersion = options?.graphApiVersion || config.instagramGraphApiVersion || 'v21.0';
     this.timeoutMs = options?.timeoutMs || config.resolverTimeoutMs || 10000;
     this.fetchFn = options?.fetchFn || fetch;
   }
@@ -62,7 +74,8 @@ export class AuthorizedAccountMediaProvider implements IMediaProvider {
       supportsOriginalDownload: true,
       supportsCarousel: true,
       requiresAuthentication: true,
-      requiresConfiguration: true
+      requiresConfiguration: true,
+      supportsProfileDiscovery: true
     };
   }
 
@@ -96,11 +109,13 @@ export class AuthorizedAccountMediaProvider implements IMediaProvider {
       const targetUrl = new URL(`https://graph.facebook.com/${this.graphApiVersion}/me/media`);
       targetUrl.searchParams.set('fields', 'id,caption,media_type,media_url,permalink,thumbnail_url,timestamp,children{id,media_type,media_url}');
       targetUrl.searchParams.set('limit', '100');
-      targetUrl.searchParams.set('access_token', token);
 
       const response = await this.fetchFn(targetUrl.toString(), {
         method: 'GET',
-        headers: { Accept: 'application/json' },
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
         signal: controller.signal
       });
 
@@ -287,6 +302,229 @@ export class AuthorizedAccountMediaProvider implements IMediaProvider {
         status: 'provider_error',
         provider: this.name,
         shortcode,
+        error: {
+          code: isAbort ? 'TIMEOUT' : 'NETWORK_ERROR',
+          message: isAbort ? 'Graph API request timed out' : 'Failed to connect to Meta Graph API'
+        }
+      };
+    }
+  }
+
+  canDiscoverProfile(_urlOrUsername: string): boolean {
+    return true;
+  }
+
+  async discoverProfile(
+    urlOrUsername: string,
+    options?: ProfileDiscoveryOptions
+  ): Promise<ProfileDiscoveryResult> {
+    const token = options?.userAccessToken || this.userAccessToken;
+    if (!token) {
+      return {
+        ok: false,
+        provider: this.name,
+        error: {
+          code: 'AUTHENTICATION_REQUIRED',
+          message:
+            'Access to discover media via Instagram Graph API requires an authorized access token with instagram_basic scope.'
+        }
+      };
+    }
+
+    if (options?.cursor && (!/^[a-zA-Z0-9_.:=+-]{1,512}$/.test(options.cursor) || options.cursor.includes('..'))) {
+      return {
+        ok: false,
+        provider: this.name,
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'Malformed pagination cursor parameter.'
+        }
+      };
+    }
+
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), this.timeoutMs);
+
+    try {
+      // 1. Fetch user account details
+      const userUrl = new URL(`https://graph.facebook.com/${this.graphApiVersion}/me`);
+      userUrl.searchParams.set('fields', 'id,username,name,biography,profile_picture_url,media_count,followers_count,follows_count');
+
+      const userResp = await this.fetchFn(userUrl.toString(), {
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        signal: controller.signal
+      });
+
+      if (userResp.status === 429) {
+        clearTimeout(timeoutHandle);
+        const retryHeader = typeof userResp.headers?.get === 'function' ? userResp.headers.get('retry-after') : undefined;
+        const retrySeconds = parseRetryAfter(retryHeader);
+        return {
+          ok: false,
+          provider: this.name,
+          error: {
+            code: 'RATE_LIMITED',
+            message: formatRateLimitMessage(retrySeconds),
+            ...(retrySeconds && retrySeconds > 0 ? { retryAfterSeconds: retrySeconds } : {})
+          }
+        };
+      }
+
+      let profileData: any = {};
+      if (userResp.ok) {
+        profileData = await userResp.json().catch(() => ({}));
+      }
+
+      // Check account ownership against requested username
+      let requestedUsername = urlOrUsername.trim();
+      if (requestedUsername.includes('/')) {
+        const parts = requestedUsername.split('/').filter(Boolean);
+        requestedUsername = parts.pop() || requestedUsername;
+      }
+      requestedUsername = requestedUsername.replace(/^@/, '').toLowerCase();
+
+      const authUsername = (profileData.username || '').toLowerCase();
+      if (
+        requestedUsername &&
+        requestedUsername !== 'me' &&
+        authUsername &&
+        requestedUsername !== authUsername
+      ) {
+        clearTimeout(timeoutHandle);
+        return {
+          ok: false,
+          provider: this.name,
+          error: {
+            code: 'AUTHENTICATION_REQUIRED',
+            message: `The provided Meta Graph API access token belongs to @${profileData.username}, not @${requestedUsername}. Meta Graph API /me/media only provides authorized access to your own managed creator or business account.`
+          }
+        };
+      }
+
+      // 2. Fetch media list with pagination cursor
+      const mediaUrl = new URL(`https://graph.facebook.com/${this.graphApiVersion}/me/media`);
+      mediaUrl.searchParams.set(
+        'fields',
+        'id,caption,media_type,media_url,permalink,thumbnail_url,timestamp,like_count,comments_count,children{id,media_type,media_url}'
+      );
+      mediaUrl.searchParams.set('limit', String(options?.limit || 24));
+      if (options?.cursor) {
+        mediaUrl.searchParams.set('after', options.cursor);
+      }
+
+      const mediaResp = await this.fetchFn(mediaUrl.toString(), {
+        headers: {
+          Accept: 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        signal: controller.signal
+      });
+      clearTimeout(timeoutHandle);
+
+      if (mediaResp.status === 429) {
+        const retryHeader = typeof mediaResp.headers?.get === 'function' ? mediaResp.headers.get('retry-after') : undefined;
+        const retrySeconds = parseRetryAfter(retryHeader);
+        return {
+          ok: false,
+          provider: this.name,
+          error: {
+            code: 'RATE_LIMITED',
+            message: formatRateLimitMessage(retrySeconds),
+            ...(retrySeconds && retrySeconds > 0 ? { retryAfterSeconds: retrySeconds } : {})
+          }
+        };
+      }
+
+      if (!mediaResp.ok) {
+        const errorJson: any = await mediaResp.json().catch(() => ({}));
+        const isAuthError =
+          mediaResp.status === 401 ||
+          errorJson?.error?.code === 190 ||
+          errorJson?.error?.type === 'OAuthException';
+        return {
+          ok: false,
+          provider: this.name,
+          error: {
+            code: isAuthError ? 'AUTHENTICATION_ERROR' : 'PROVIDER_ERROR',
+            message: errorJson?.error?.message || `Meta Graph API responded with HTTP ${mediaResp.status}`
+          }
+        };
+      }
+
+      const rawJson: any = await mediaResp.json();
+      const rawItems: any[] = Array.isArray(rawJson?.data) ? rawJson.data : [];
+
+      const items: ProfileMediaItem[] = rawItems.map((item) => {
+        const isCarousel = item.media_type === 'CAROUSEL_ALBUM';
+        const isVideo = item.media_type === 'VIDEO';
+        const type: 'image' | 'video' | 'carousel' = isCarousel ? 'carousel' : isVideo ? 'video' : 'image';
+
+        const permalink = item.permalink || `https://www.instagram.com/p/${item.id}/`;
+        const shortcodeMatch = permalink.match(/\/(?:p|reel|tv)\/([a-zA-Z0-9_-]+)/);
+        const shortcode = shortcodeMatch ? shortcodeMatch[1] : item.id;
+
+        const mediaItem: ProfileMediaItem = {
+          id: item.id,
+          shortcode,
+          url: permalink,
+          type,
+          thumbnailUrl: item.thumbnail_url || item.media_url || '',
+          displayUrl: item.media_url || item.thumbnail_url || '',
+          caption: item.caption,
+          likesCount: item.like_count,
+          commentsCount: item.comments_count,
+          timestamp: item.timestamp ? new Date(item.timestamp).getTime() : undefined
+        };
+
+        if (isCarousel && item.children?.data) {
+          mediaItem.carouselMedia = item.children.data.map((c: any) => ({
+            id: c.id,
+            type: c.media_type === 'VIDEO' ? 'video' : 'image',
+            url: c.media_url,
+            thumbnailUrl: c.thumbnail_url || c.media_url
+          }));
+        }
+
+        return mediaItem;
+      });
+
+      const cleanUsername = profileData.username || urlOrUsername.replace(/https?:\/\/(?:www\.)?instagram\.com\//, '').replace(/\/$/, '').replace(/^@/, '');
+      const profileInfo: ProfileInfo = {
+        username: cleanUsername,
+        fullName: profileData.name || cleanUsername,
+        biography: profileData.biography,
+        avatarUrl: profileData.profile_picture_url,
+        isPrivate: false,
+        isVerified: false,
+        postsCount: profileData.media_count ?? items.length,
+        followersCount: profileData.followers_count,
+        followingCount: profileData.follows_count
+      };
+
+      const paging = rawJson?.paging;
+      const afterCursor = paging?.cursors?.after;
+      const hasMore = Boolean(paging?.next && afterCursor);
+
+      return {
+        ok: true,
+        provider: this.name,
+        profile: profileInfo,
+        items,
+        pagination: {
+          hasMore,
+          nextCursor: afterCursor,
+          totalLoaded: items.length
+        }
+      };
+    } catch (err: unknown) {
+      clearTimeout(timeoutHandle);
+      const isAbort = err instanceof Error && err.name === 'AbortError';
+      return {
+        ok: false,
+        provider: this.name,
         error: {
           code: isAbort ? 'TIMEOUT' : 'NETWORK_ERROR',
           message: isAbort ? 'Graph API request timed out' : 'Failed to connect to Meta Graph API'

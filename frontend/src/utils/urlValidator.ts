@@ -1,4 +1,4 @@
-export type InstagramMediaType = 'post' | 'reel' | 'tv' | 'direct_media';
+export type InstagramMediaType = 'post' | 'reel' | 'tv' | 'profile' | 'direct_media';
 
 export interface DirectMediaInfo {
   hostname: string;
@@ -12,6 +12,7 @@ export interface ParsedUrlResult {
   originalUrl: string;
   normalizedUrl?: string;
   shortcode?: string;
+  username?: string;
   mediaType?: InstagramMediaType;
   directMediaInfo?: DirectMediaInfo;
   error?: string;
@@ -27,6 +28,37 @@ export const EXACT_ALLOWED_HOSTS = new Set([
 
 // Valid shortcode regex: Base64URL-style characters between 3 and 40 chars
 export const SHORTCODE_REGEX = /^[a-zA-Z0-9_-]{3,40}$/;
+
+// Instagram username regex: 1-30 chars, alphanumeric + periods + underscores, no leading/trailing dot, no consecutive dots
+export const USERNAME_REGEX = /^(?!.*\.\.)(?!^\.)(?!.*\.$)[a-zA-Z0-9._]{1,30}$/;
+
+// Reserved top-level Instagram paths that must never be treated as profile usernames
+export const RESERVED_INSTAGRAM_PATHS = new Set([
+  'p',
+  'reel',
+  'reels',
+  'tv',
+  'stories',
+  'explore',
+  'accounts',
+  'direct',
+  'create',
+  'about',
+  'legal',
+  'privacy',
+  'terms',
+  'help',
+  'developer',
+  'api',
+  'graphql',
+  'directory',
+  'download',
+  'settings',
+  'your_activity',
+  'saved',
+  'archive',
+  'emails'
+]);
 
 export const TRACKING_PARAMS = new Set([
   'utm_source',
@@ -54,6 +86,7 @@ export function isInstagramCdnHostname(hostname: string): boolean {
 interface PathMatch {
   shortcode: string;
   mediaType: InstagramMediaType;
+  username?: string;
 }
 
 function matchInstagramPath(pathname: string): PathMatch | null {
@@ -79,14 +112,23 @@ function matchInstagramPath(pathname: string): PathMatch | null {
   }
 
   // 4. User-prefixed Post or Reel: /{username}/p/{shortcode} or /{username}/reel/{shortcode}
-  const userPostMatch = cleanPath.match(/^\/[a-zA-Z0-9_.]+\/p\/([a-zA-Z0-9_-]+)$/);
+  const userPostMatch = cleanPath.match(/^\/([a-zA-Z0-9_.]+)\/p\/([a-zA-Z0-9_-]+)$/);
   if (userPostMatch) {
-    return { shortcode: userPostMatch[1], mediaType: 'post' };
+    return { shortcode: userPostMatch[2], username: userPostMatch[1], mediaType: 'post' };
   }
 
-  const userReelMatch = cleanPath.match(/^\/[a-zA-Z0-9_.]+\/reels?\/([a-zA-Z0-9_-]+)$/);
+  const userReelMatch = cleanPath.match(/^\/([a-zA-Z0-9_.]+)\/reels?\/([a-zA-Z0-9_-]+)$/);
   if (userReelMatch) {
-    return { shortcode: userReelMatch[1], mediaType: 'reel' };
+    return { shortcode: userReelMatch[2], username: userReelMatch[1], mediaType: 'reel' };
+  }
+
+  // 5. User Profile: /{username}
+  const profileMatch = cleanPath.match(/^\/([a-zA-Z0-9_.]+)$/);
+  if (profileMatch) {
+    const candidate = profileMatch[1];
+    if (!RESERVED_INSTAGRAM_PATHS.has(candidate.toLowerCase()) && USERNAME_REGEX.test(candidate)) {
+      return { shortcode: candidate, username: candidate, mediaType: 'profile' };
+    }
   }
 
   return null;
@@ -100,6 +142,15 @@ export function parseInstagramUrl(rawUrl: string): ParsedUrlResult {
   const trimmed = rawUrl.trim();
   if (!trimmed) {
     return { valid: false, originalUrl: rawUrl, error: 'Empty URL' };
+  }
+
+  // Reject path traversal sequences
+  if (trimmed.includes('/../') || trimmed.includes('/..') || trimmed.includes('\\')) {
+    return {
+      valid: false,
+      originalUrl: rawUrl,
+      error: 'Path traversal sequences are not permitted'
+    };
   }
 
   let parsed: URL;
@@ -179,7 +230,19 @@ export function parseInstagramUrl(rawUrl: string): ParsedUrlResult {
     return {
       valid: false,
       originalUrl: rawUrl,
-      error: 'Unrecognized Instagram path (expected /p/, /reel/, /reels/, or /tv/)'
+      error: 'Unrecognized Instagram path (expected /p/, /reel/, /reels/, /tv/, or valid profile /<username>/)'
+    };
+  }
+
+  if (match.mediaType === 'profile') {
+    const normalizedUrl = `https://www.instagram.com/${match.username}/`;
+    return {
+      valid: true,
+      originalUrl: rawUrl,
+      normalizedUrl,
+      shortcode: match.username,
+      username: match.username,
+      mediaType: 'profile'
     };
   }
 
@@ -201,12 +264,13 @@ export function parseInstagramUrl(rawUrl: string): ParsedUrlResult {
     originalUrl: rawUrl,
     normalizedUrl,
     shortcode: match.shortcode,
+    username: match.username,
     mediaType: match.mediaType
   };
 }
 
 export function parseBatchUrls(text: string): {
-  valid: Array<{ url: string; normalizedUrl: string; shortcode: string; mediaType: InstagramMediaType }>;
+  valid: Array<{ url: string; normalizedUrl: string; shortcode: string; mediaType: InstagramMediaType; username?: string }>;
   invalid: Array<{ url: string; error: string }>;
 } {
   const lines = text
@@ -214,7 +278,7 @@ export function parseBatchUrls(text: string): {
     .map((line) => line.trim())
     .filter((line) => line.length > 0);
 
-  const valid: Array<{ url: string; normalizedUrl: string; shortcode: string; mediaType: InstagramMediaType }> = [];
+  const valid: Array<{ url: string; normalizedUrl: string; shortcode: string; mediaType: InstagramMediaType; username?: string }> = [];
   const invalid: Array<{ url: string; error: string }> = [];
   const seenUrls = new Set<string>();
 
@@ -227,6 +291,7 @@ export function parseBatchUrls(text: string): {
           url: res.originalUrl,
           normalizedUrl: res.normalizedUrl,
           shortcode: res.shortcode,
+          username: res.username,
           mediaType: res.mediaType
         });
       }

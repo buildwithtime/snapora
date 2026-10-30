@@ -4,9 +4,15 @@ import { parseBatchUrls } from '../utils/urlValidator.js';
 import { saveJobsToStorage, loadJobsFromStorage } from '../utils/storage.js';
 import { resolveClientMock } from '../utils/mockResolver.js';
 import { generateMediaFilename, FilenameCollisionTracker } from '../utils/filenameGenerator.js';
-import { buildAndDownloadZip } from '../utils/zipDownloader.js';
+import { buildAndDownloadZip, ZipResult } from '../utils/zipDownloader.js';
 import { addRecentDownload } from '../utils/recentHistory.js';
 import { safeFetchJson } from '../utils/apiClient.js';
+
+export interface DownloadAllOptions {
+  retryFailedOnly?: boolean;
+  mode?: DownloadMode;
+  targetJobIds?: string[];
+}
 
 interface QueueContextType {
   state: QueueState;
@@ -14,7 +20,7 @@ interface QueueContextType {
   setUserAccessToken: (token: string) => void;
   downloadMode: DownloadMode;
   setDownloadMode: (mode: DownloadMode) => void;
-  addUrls: (rawText: string) => { addedCount: number; duplicateCount: number; invalidCount: number };
+  addUrls: (rawText: string) => { addedCount: number; duplicateCount: number; invalidCount: number; addedJobIds: string[] };
   pauseQueue: () => void;
   resumeQueue: () => void;
   retryJob: (jobId: string) => void;
@@ -23,7 +29,11 @@ interface QueueContextType {
   clearFailed: () => void;
   triggerDownload: (media: MediaItem) => void;
   downloadMediaItem: (jobId: string, item: MediaItem | CarouselItem) => Promise<boolean>;
-  downloadAll: (jobId?: string, options?: { retryFailedOnly?: boolean; mode?: DownloadMode }) => Promise<void>;
+  downloadAll: (jobId?: string, options?: DownloadAllOptions) => Promise<void>;
+  downloadItemsAsZip: (
+    items: Array<{ jobId: string; item: MediaItem | CarouselItem }>,
+    archivePrefix?: string
+  ) => Promise<ZipResult>;
   cancelDownloadAll: () => void;
 }
 
@@ -41,7 +51,7 @@ export function queueReducer(state: QueueState, action: QueueAction): QueueState
     case 'ADD_JOBS': {
       const now = Date.now();
       const newJobs: QueueJob[] = action.payload.map((item, index) => ({
-        id: `job_${now}_${index}_${Math.random().toString(36).slice(2, 7)}`,
+        id: item.id || `job_${now}_${index}_${Math.random().toString(36).slice(2, 7)}`,
         url: item.url,
         normalizedUrl: item.normalizedUrl,
         shortcode: item.shortcode,
@@ -515,14 +525,23 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const nonDuplicates = valid.filter((v) => !currentShortcodes.has(v.shortcode));
     const duplicateCount = valid.length - nonDuplicates.length;
 
-    if (nonDuplicates.length > 0) {
-      dispatch({ type: 'ADD_JOBS', payload: nonDuplicates });
+    const now = Date.now();
+    const addedJobIds: string[] = [];
+    const jobsWithIds = nonDuplicates.map((item, index) => {
+      const id = `job_${now}_${index}_${Math.random().toString(36).slice(2, 7)}`;
+      addedJobIds.push(id);
+      return { ...item, id };
+    });
+
+    if (jobsWithIds.length > 0) {
+      dispatch({ type: 'ADD_JOBS', payload: jobsWithIds });
     }
 
     return {
       addedCount: nonDuplicates.length,
       duplicateCount,
-      invalidCount: invalid.length
+      invalidCount: invalid.length,
+      addedJobIds
     };
   };
 
@@ -666,7 +685,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const downloadAll = async (
     targetJobId?: string,
-    options?: { retryFailedOnly?: boolean; mode?: DownloadMode }
+    options?: DownloadAllOptions
   ) => {
     // Prevent duplicate concurrent execution
     if (downloadAbortControllerRef.current) {
@@ -675,7 +694,11 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const retryFailedOnly = Boolean(options?.retryFailedOnly);
     const activeMode = options?.mode || downloadMode;
-    const jobsToProcess = targetJobId
+    const targetJobIds = options?.targetJobIds;
+
+    const jobsToProcess = targetJobIds && targetJobIds.length > 0
+      ? state.jobs.filter((j) => targetJobIds.includes(j.id))
+      : targetJobId
       ? state.jobs.filter((j) => j.id === targetJobId)
       : state.jobs;
 
@@ -830,6 +853,59 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     downloadAbortControllerRef.current = null;
   };
 
+  const downloadItemsAsZip = async (
+    customItems: Array<{ jobId: string; item: MediaItem | CarouselItem }>,
+    archivePrefix?: string
+  ): Promise<ZipResult> => {
+    if (downloadAbortControllerRef.current || customItems.length === 0) {
+      return {
+        success: false,
+        archiveName: '',
+        completed: 0,
+        failed: 0,
+        failedItemIds: [],
+        totalBytes: 0,
+        error: customItems.length === 0 ? 'No items selected' : 'Another download operation is currently in progress'
+      };
+    }
+
+    const abortController = new AbortController();
+    downloadAbortControllerRef.current = abortController;
+
+    const batchTracker = new FilenameCollisionTracker();
+    customItems.forEach(({ item }) => {
+      item.filename = batchTracker.getUniqueFilename(item.filename);
+    });
+
+    try {
+      const result = await buildAndDownloadZip({
+        items: customItems,
+        apiBaseUrl,
+        isDemoMode,
+        archivePrefix,
+        signal: abortController.signal,
+        onProgress: (update) => {
+          dispatch({
+            type: 'SET_DOWNLOAD_ALL_STATS',
+            payload: {
+              active: update.phase === 'fetching' || update.phase === 'compressing',
+              mode: 'zip',
+              phase: update.phase,
+              total: update.total,
+              completed: update.completed,
+              failed: update.failed,
+              currentFilename: update.currentFilename,
+              archiveName: update.archiveName
+            }
+          });
+        }
+      });
+      return result;
+    } finally {
+      downloadAbortControllerRef.current = null;
+    }
+  };
+
   const cancelDownloadAll = () => {
     if (downloadAbortControllerRef.current) {
       downloadAbortControllerRef.current.abort();
@@ -865,6 +941,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         triggerDownload,
         downloadMediaItem,
         downloadAll,
+        downloadItemsAsZip,
         cancelDownloadAll
       }}
     >

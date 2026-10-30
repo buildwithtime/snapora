@@ -8,6 +8,7 @@ import fastifyStatic from '@fastify/static';
 import { config } from './config/index.js';
 import { healthRoutes } from './routes/health.js';
 import { resolveRoutes } from './routes/resolve.js';
+import { profileRoutes } from './routes/profile.js';
 import { downloadRoutes } from './routes/download.js';
 import { createErrorResponse, formatRateLimitMessage } from './utils/errors.js';
 import { IMediaProvider } from './providers/types.js';
@@ -86,6 +87,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   // Register API routes
   await app.register(healthRoutes);
   await app.register(resolveRoutes, { provider: options.provider });
+  await app.register(profileRoutes, { provider: options.provider });
   await app.register(downloadRoutes);
 
   // Serve compiled frontend when dist directory exists (single-service deployment)

@@ -26,6 +26,13 @@ Snapora is an open-source, client-first media utility engineered for reliability
 
 ## ✨ Core Capabilities
 
+- **Profile-Wide Media Discovery & Selective Downloading (v0.3.0)**:
+  - Input any public Instagram profile URL (e.g. `instagram.com/creator/`) or `@username` handle.
+  - Interactive grid gallery displaying posts, Reels, and carousel albums with post counts, follower badges, and bio.
+  - Responsive multi-column layout with instant type filtering (`Photos`, `Videos`, `Carousels`).
+  - Batch selection toolbar (`Select All`, `Select None`, `Invert`) that persists across multi-page cursor pagination.
+  - Carousel inspection modal to preview and selectively download individual slides or queue complete albums.
+  - Seamless integration with the core sequential download queue and bulk ZIP export engine.
 - **Sequential Multi-URL Queue**: Add multiple URLs at once (newline-separated or comma-delimited) and process them sequentially with pause, resume, retry, and cancellation controls.
 - **Enhanced Instagram URL Support**: Robust normalization for `/p/`, `/reel/`, `/reels/`, `/tv/`, `m.instagram.com`, `instagr.am`, and direct Meta CDN URLs (`scontent*.cdninstagram.com`), stripping tracking parameters (`?igsh=...`, `?utm_source=...`) and hash fragments.
 - **Formalized Provider Architecture (`IMediaProvider`)**:
@@ -34,14 +41,6 @@ Snapora is an open-source, client-first media utility engineered for reliability
   - `InstagramOEmbedProvider` (`oembed`): Permitted official post embed frames, author metadata, and thumbnail previews via Meta Graph API v21.0.
   - `AuthorizedAccountMediaProvider` (`authorized`): Official Meta Business Login OAuth 2.0 integration for creator/business accounts to download their own original media and carousels.
   - `DirectMediaUrlProvider` (`direct`): Ingests verified Meta CDN URLs with SSRF DNS pre-flight checks and cryptographic token validation.
-- **Genuine Binary Validation**: Validates file magic bytes (JPEG SOI `FF D8 FF`, MP4 `ftyp` box) and rejects disguised HTML/JSON error pages before marking downloads complete.
-- **Carousel Album Traversal**: Structured `CarouselItem` model supporting multi-item previews and independent downloads.
-- **Client-Side Persistence**: Queue state and job history persist in your browser's IndexedDB, keeping your data entirely local.
-- **Standalone Demo Mode**: Can be deployed as a 100% static client on GitHub Pages without requiring a deployed backend server.
-- **Privacy & Security First**:
-  - **Zero Credential Collection**: No Instagram logins, sessions, or passwords needed or stored.
-  - **SSRF Defenses**: Socket-level DNS pre-flight filtering blocking all private RFC1918 subnets, loopback, link-local, multicast, and cloud metadata (`169.254.169.254`) across IPv4 and IPv6.
-  - **No User Tracking**: Stateless backend proxy; zero user database or persistent server telemetry.
 - **Genuine Binary Validation**: Validates file magic bytes (JPEG SOI `FF D8 FF`, MP4 `ftyp` box) and rejects disguised HTML/JSON error pages before marking downloads complete.
 - **Carousel Album Traversal**: Structured `CarouselItem` model supporting multi-item previews and independent downloads.
 - **Client-Side Persistence**: Queue state and job history persist in your browser's IndexedDB, keeping your data entirely local.

@@ -1,4 +1,5 @@
 import { MediaItem, CarouselItem, ResolutionStatus, PreviewData } from '../types/queue.js';
+import { ProfileDiscoveryResult, ProfileMediaItem } from '../types/profile.js';
 
 export interface ClientResolveResult {
   ok: boolean;
@@ -219,5 +220,157 @@ export async function resolveClientMock(shortcode: string): Promise<ClientResolv
       title: `Photo by @user_${shortcode}`
     },
     media: [photoItem]
+  };
+}
+
+/**
+ * Client-Side Deterministic Profile Discovery Mock
+ * Enables profile browsing and selective downloading demo mode without a backend server.
+ */
+export async function discoverProfileClientMock(
+  username: string,
+  cursor?: string
+): Promise<ProfileDiscoveryResult> {
+  await new Promise((resolve) => setTimeout(resolve, 200));
+
+  const clean = username.replace(/^@/, '').trim();
+  const lower = clean.toLowerCase();
+
+  if (lower.includes('private')) {
+    return {
+      ok: false,
+      provider: 'MockProvider (Demo Mode)',
+      error: {
+        code: 'PRIVATE_ACCOUNT',
+        message: `This account (@${clean}) is private. Posts are only visible to approved followers.`
+      }
+    };
+  }
+
+  if (lower.includes('ratelimit') || lower.includes('429')) {
+    return {
+      ok: false,
+      provider: 'MockProvider (Demo Mode)',
+      error: {
+        code: 'RATE_LIMITED',
+        message: 'Instagram is temporarily limiting requests. Please try again in 60 seconds.',
+        retryAfterSeconds: 60
+      }
+    };
+  }
+
+  if (lower.includes('notfound') || lower.includes('404')) {
+    return {
+      ok: false,
+      provider: 'MockProvider (Demo Mode)',
+      error: {
+        code: 'POST_NOT_FOUND',
+        message: `Instagram profile '@${clean}' could not be found.`
+      }
+    };
+  }
+
+  if (lower.includes('empty')) {
+    return {
+      ok: true,
+      provider: 'MockProvider (Demo Mode)',
+      profile: {
+        username: clean,
+        fullName: 'Empty Profile Fixture',
+        biography: 'No media posts yet.',
+        avatarUrl: `https://picsum.photos/seed/${clean}_avatar/300/300`,
+        isPrivate: false,
+        isVerified: false,
+        postsCount: 0,
+        followersCount: 12,
+        followingCount: 45
+      },
+      items: [],
+      pagination: {
+        hasMore: false,
+        totalLoaded: 0
+      }
+    };
+  }
+
+  const isPage2 = cursor === 'cursor_page_2';
+  const startIdx = isPage2 ? 13 : 1;
+  const endIdx = isPage2 ? 24 : 12;
+
+  const items: ProfileMediaItem[] = [];
+  for (let i = startIdx; i <= endIdx; i++) {
+    const type: 'image' | 'video' | 'carousel' =
+      i % 3 === 0 ? 'carousel' : i % 3 === 1 ? 'image' : 'video';
+
+    const shortcode = `DemoPost_${clean}_${i}`;
+    const item: ProfileMediaItem = {
+      id: `demo_${clean}_${i}`,
+      shortcode,
+      url: `https://www.instagram.com/p/${shortcode}/`,
+      type,
+      thumbnailUrl: `https://picsum.photos/seed/${clean}_${i}/480/480`,
+      displayUrl: `https://picsum.photos/seed/${clean}_${i}/1080/1080`,
+      caption: `Captivating creative post #${i} by @${clean} exploring photography and design compositions.`,
+      likesCount: 1240 + i * 92,
+      commentsCount: 38 + i * 5,
+      timestamp: Date.now() - i * 86400000
+    };
+
+    if (type === 'video') {
+      item.videoDurationSeconds = 30 + (i % 45);
+    }
+
+    if (type === 'carousel') {
+      item.carouselMedia = [
+        {
+          id: `demo_${clean}_${i}_slide_1`,
+          type: 'image',
+          url: `https://picsum.photos/seed/${clean}_${i}_1/1080/1080`,
+          thumbnailUrl: `https://picsum.photos/seed/${clean}_${i}_1/320/320`,
+          width: 1080,
+          height: 1080
+        },
+        {
+          id: `demo_${clean}_${i}_slide_2`,
+          type: 'image',
+          url: `https://picsum.photos/seed/${clean}_${i}_2/1080/1080`,
+          thumbnailUrl: `https://picsum.photos/seed/${clean}_${i}_2/320/320`,
+          width: 1080,
+          height: 1080
+        },
+        {
+          id: `demo_${clean}_${i}_slide_3`,
+          type: 'image',
+          url: `https://picsum.photos/seed/${clean}_${i}_3/1080/1080`,
+          thumbnailUrl: `https://picsum.photos/seed/${clean}_${i}_3/320/320`,
+          width: 1080,
+          height: 1080
+        }
+      ];
+    }
+
+    items.push(item);
+  }
+
+  return {
+    ok: true,
+    provider: 'MockProvider (Demo Mode)',
+    profile: {
+      username: clean,
+      fullName: `${clean.charAt(0).toUpperCase() + clean.slice(1)} Visuals`,
+      biography: `Design, architecture, and editorial photography. Demo profile for Snapora.`,
+      avatarUrl: `https://picsum.photos/seed/${clean}_avatar/300/300`,
+      isPrivate: false,
+      isVerified: true,
+      postsCount: 24,
+      followersCount: 245000,
+      followingCount: 380
+    },
+    items,
+    pagination: {
+      hasMore: !isPage2,
+      nextCursor: isPage2 ? undefined : 'cursor_page_2',
+      totalLoaded: isPage2 ? 24 : 12
+    }
   };
 }
