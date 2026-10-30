@@ -26,7 +26,7 @@ Snapora adopts a decoupled deployment model designed for zero-cost static hostin
 
 ### Configuration
 
-- **Base Path**: Configured as relative (`base: './'`) in `frontend/vite.config.ts`. The compiled bundle works seamlessly in root domains (`https://snapora.app`) or repository subpaths (`https://user.github.io/snapora/`) without broken asset links.
+- **Base Path**: Configured as relative (`base: './'`) in `frontend/vite.config.ts`. The compiled bundle works seamlessly in root domains (such as `https://snapora-1r3i.onrender.com/`) or repository subpaths (`https://user.github.io/snapora/`) without broken asset links.
 - **Routing**: Single-page application without server-side rewrites. All queue state is managed locally via React Context and IndexedDB.
 - **API Base URL**: Configured via the `VITE_API_BASE_URL` environment variable during CI build:
   ```bash

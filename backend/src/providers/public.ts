@@ -2,6 +2,7 @@ import { IMediaProvider, ProviderCapabilities, ResolveResult, MediaItem, Carouse
 import { parseInstagramUrl } from '../utils/urlParser.js';
 import { safeHttpsRequest } from '../utils/ssrfClient.js';
 import { config } from '../config/index.js';
+import { parseRetryAfter, formatRateLimitMessage } from '../utils/errors.js';
 
 export interface PublicWebProviderOptions {
   timeoutMs?: number;
@@ -84,6 +85,9 @@ export class PublicWebMediaProvider implements IMediaProvider {
 
       if (safeResponse.statusCode === 429) {
         safeResponse.stream.destroy();
+        const retryHeader = safeResponse.headers['retry-after'];
+        const retrySeconds = parseRetryAfter(retryHeader);
+        const message = formatRateLimitMessage(retrySeconds);
         return {
           ok: false,
           status: 'rate_limited',
@@ -91,7 +95,8 @@ export class PublicWebMediaProvider implements IMediaProvider {
           shortcode,
           error: {
             code: 'RATE_LIMITED',
-            message: 'Instagram web rate limit reached. Please wait a few moments before retrying.'
+            message,
+            ...(retrySeconds && retrySeconds > 0 ? { retryAfterSeconds: retrySeconds } : {})
           }
         };
       }

@@ -3,7 +3,7 @@ import net from 'node:net';
 import { z } from 'zod';
 import { parseInstagramUrl } from '../utils/urlParser.js';
 import { validateMediaBytes } from '../utils/mediaValidator.js';
-import { createErrorResponse } from '../utils/errors.js';
+import { createErrorResponse, parseRetryAfter, formatRateLimitMessage } from '../utils/errors.js';
 import { safeHttpsRequest, SafeRequestResponse } from '../utils/ssrfClient.js';
 import { isPrivateOrReservedIp } from '../utils/ssrf.js';
 import { config } from '../config/index.js';
@@ -111,6 +111,19 @@ export async function downloadRoutes(app: FastifyInstance) {
         return reply.status(502).send(createErrorResponse('NETWORK_ERROR', `Failed to connect to media host: ${msg}`));
       }
 
+      if (safeResponse.statusCode === 429) {
+        safeResponse.stream.destroy();
+        const retryHeader = safeResponse.headers['retry-after'];
+        const retrySeconds = parseRetryAfter(retryHeader);
+        const message = formatRateLimitMessage(retrySeconds);
+        if (retrySeconds && retrySeconds > 0) {
+          reply.header('Retry-After', retrySeconds.toString());
+        }
+        return reply.status(429).send(
+          createErrorResponse('RATE_LIMITED', message, undefined, retrySeconds && retrySeconds > 0 ? retrySeconds : undefined)
+        );
+      }
+
       if (safeResponse.statusCode >= 400) {
         safeResponse.stream.destroy();
         return reply.status(502).send(
@@ -207,6 +220,8 @@ export async function downloadRoutes(app: FastifyInstance) {
       const safeFilename = sanitizeFilename(filename, magicCheck.detectedType);
       reply.raw.setHeader('Content-Type', magicCheck.detectedType || 'application/octet-stream');
       reply.raw.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+      reply.raw.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+      reply.raw.setHeader('Pragma', 'no-cache');
       reply.raw.setHeader('X-Content-Type-Options', 'nosniff');
       if (contentLengthHeader) {
         reply.raw.setHeader('Content-Length', contentLengthHeader);
@@ -217,19 +232,23 @@ export async function downloadRoutes(app: FastifyInstance) {
 
       let totalBytes = firstChunk.length;
 
-      stream.on('data', (chunk: Buffer) => {
-        totalBytes += chunk.length;
-        if (totalBytes > config.maxResponseSizeBytes) {
-          stream.destroy(new Error('File size exceeded limit'));
-          reply.raw.destroy(new Error('File size exceeded limit'));
-          return;
-        }
-        reply.raw.write(chunk);
-      });
-
-      stream.on('end', () => {
+      if (stream.readableEnded) {
         reply.raw.end();
-      });
+      } else {
+        stream.on('data', (chunk: Buffer) => {
+          totalBytes += chunk.length;
+          if (totalBytes > config.maxResponseSizeBytes) {
+            stream.destroy(new Error('File size exceeded limit'));
+            reply.raw.destroy(new Error('File size exceeded limit'));
+            return;
+          }
+          reply.raw.write(chunk);
+        });
+
+        stream.on('end', () => {
+          reply.raw.end();
+        });
+      }
 
       stream.on('error', () => {
         if (!reply.raw.writableEnded) {

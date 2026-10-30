@@ -72,6 +72,10 @@ export async function resolveRoutes(app: FastifyInstance, options?: { provider?:
               ? 422
               : 502;
 
+          if (status === 429 && result.error.retryAfterSeconds && result.error.retryAfterSeconds > 0) {
+            reply.header('Retry-After', result.error.retryAfterSeconds.toString());
+          }
+
           return reply.status(status).send(result);
         }
 

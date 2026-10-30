@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import path from 'node:path';
+import fs from 'node:fs';
 import { FastifyInstance } from 'fastify';
 import { buildServer } from './server.js';
 import { MockProvider } from './providers/mock.js';
@@ -43,6 +45,27 @@ describe('Snapora Backend API & Security Suite', () => {
       expect(json.ok).toBe(true);
       expect(json.service).toBe('snapora-backend');
       expect(json.status).toBe('healthy');
+    });
+
+    it('sets standard security response headers on outgoing responses', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health'
+      });
+
+      expect(response.headers['x-content-type-options']).toBe('nosniff');
+      expect(response.headers['x-frame-options']).toBe('SAMEORIGIN');
+      expect(response.headers['referrer-policy']).toBe('strict-origin-when-cross-origin');
+    });
+
+    it('does not apply no-store, no-cache to /health endpoint', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health'
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['cache-control']).toBeUndefined();
     });
   });
 
@@ -94,6 +117,55 @@ describe('Snapora Backend API & Security Suite', () => {
       const json = response.json();
       expect(json.ok).toBe(false);
       expect(json.error.code).toBe('PRIVATE_ACCOUNT');
+    });
+
+    it('sets Cache-Control: no-store, no-cache, must-revalidate and Pragma: no-cache on successful /api/resolve', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/resolve',
+        payload: {
+          url: 'https://www.instagram.com/p/C8XYZ123/'
+        }
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['cache-control']).toBe('no-store, no-cache, must-revalidate');
+      expect(response.headers['pragma']).toBe('no-cache');
+    });
+
+    it('sets Cache-Control and Pragma headers on /api/resolve error responses', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/resolve',
+        payload: {
+          url: 'https://www.instagram.com/p/private_post_403/'
+        }
+      });
+
+      expect(response.statusCode).toBe(403);
+      expect(response.headers['cache-control']).toBe('no-store, no-cache, must-revalidate');
+      expect(response.headers['pragma']).toBe('no-cache');
+    });
+
+    it('forwards Retry-After header and returns 429 with formatted message on rate limiting', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/resolve',
+        payload: {
+          url: 'https://www.instagram.com/p/ratelimit_test/'
+        }
+      });
+
+      expect(response.statusCode).toBe(429);
+      expect(response.headers['cache-control']).toBe('no-store, no-cache, must-revalidate');
+      expect(response.headers['pragma']).toBe('no-cache');
+      expect(response.headers['retry-after']).toBe('60');
+
+      const json = response.json();
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('RATE_LIMITED');
+      expect(json.error.message).toBe('Instagram is temporarily limiting requests. Please try again in 60 seconds.');
+      expect(json.error.retryAfterSeconds).toBe(60);
     });
   });
 
@@ -221,6 +293,101 @@ describe('Snapora Backend API & Security Suite', () => {
       const json = response.json();
       expect(json.ok).toBe(false);
       expect(json.error.code).toBe('INVALID_REQUEST');
+    });
+  });
+
+  describe('Production SEO & Metadata Integrity', () => {
+    const candidatePublicDirs = [
+      path.resolve(process.cwd(), 'frontend/public'),
+      path.resolve(process.cwd(), '../frontend/public')
+    ];
+    const frontendPublic = candidatePublicDirs.find((dir) => fs.existsSync(dir))!;
+
+    const candidateIndexDirs = [
+      path.resolve(process.cwd(), 'frontend/index.html'),
+      path.resolve(process.cwd(), '../frontend/index.html')
+    ];
+    const frontendIndex = candidateIndexDirs.find((f) => fs.existsSync(f))!;
+
+    it('validates sitemap.xml contains absolute production homepage URL', () => {
+      const sitemapPath = path.resolve(frontendPublic, 'sitemap.xml');
+      expect(fs.existsSync(sitemapPath)).toBe(true);
+
+      const content = fs.readFileSync(sitemapPath, 'utf8');
+      expect(content).toContain('<?xml version="1.0" encoding="UTF-8"?>');
+      expect(content).toContain('<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">');
+      expect(content).toContain('<loc>https://snapora-1r3i.onrender.com/</loc>');
+      expect(content).not.toContain('<loc>/</loc>');
+    });
+
+    it('validates robots.txt allows public crawling, disallows /api/, and points to production sitemap', () => {
+      const robotsPath = path.resolve(frontendPublic, 'robots.txt');
+      expect(fs.existsSync(robotsPath)).toBe(true);
+
+      const content = fs.readFileSync(robotsPath, 'utf8');
+      expect(content).toContain('User-agent: *');
+      expect(content).toContain('Allow: /');
+      expect(content).toContain('Disallow: /api/');
+      expect(content).toContain('Sitemap: https://snapora-1r3i.onrender.com/sitemap.xml');
+    });
+
+    it('validates canonical URL, Open Graph, Twitter Cards, and JSON-LD in index.html', () => {
+      expect(fs.existsSync(frontendIndex)).toBe(true);
+
+      const html = fs.readFileSync(frontendIndex, 'utf8');
+
+      // Canonical URL
+      expect(html).toContain('<link rel="canonical" href="https://snapora-1r3i.onrender.com/" />');
+
+      // Open Graph
+      expect(html).toContain('<meta property="og:url" content="https://snapora-1r3i.onrender.com/" />');
+      expect(html).toContain('<meta property="og:image" content="https://snapora-1r3i.onrender.com/favicon.svg" />');
+
+      // Twitter Cards
+      expect(html).toContain('<meta name="twitter:url" content="https://snapora-1r3i.onrender.com/" />');
+      expect(html).toContain('<meta name="twitter:image" content="https://snapora-1r3i.onrender.com/favicon.svg" />');
+
+      // Schema.org JSON-LD
+      const jsonLdMatch = html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/);
+      expect(jsonLdMatch).not.toBeNull();
+      const parsedLd = JSON.parse(jsonLdMatch![1]);
+      expect(parsedLd['@context']).toBe('https://schema.org');
+      expect(parsedLd['@type']).toBe('WebApplication');
+      expect(parsedLd.name).toBe('Snapora');
+      expect(parsedLd.url).toBe('https://snapora-1r3i.onrender.com/');
+    });
+
+    it('serves sitemap.xml and robots.txt via Fastify static file serving when dist exists', async () => {
+      const distDirs = [
+        path.resolve(process.cwd(), 'frontend/dist'),
+        path.resolve(process.cwd(), '../frontend/dist')
+      ];
+      const distDir = distDirs.find((dir) => fs.existsSync(dir));
+
+      if (distDir) {
+        const staticApp = await buildServer({
+          provider: new MockProvider(),
+          enableRateLimit: false,
+          serveStatic: true
+        });
+        await staticApp.ready();
+
+        const sitemapRes = await staticApp.inject({
+          method: 'GET',
+          url: '/sitemap.xml'
+        });
+        expect(sitemapRes.statusCode).toBe(200);
+        expect(sitemapRes.body).toContain('<loc>https://snapora-1r3i.onrender.com/</loc>');
+
+        const robotsRes = await staticApp.inject({
+          method: 'GET',
+          url: '/robots.txt'
+        });
+        expect(robotsRes.statusCode).toBe(200);
+        expect(robotsRes.body).toContain('Sitemap: https://snapora-1r3i.onrender.com/sitemap.xml');
+
+        await staticApp.close();
+      }
     });
   });
 });

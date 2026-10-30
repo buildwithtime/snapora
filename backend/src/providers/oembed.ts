@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { IMediaProvider, ResolveResult, ProviderCapabilities } from './types.js';
 import { config } from '../config/index.js';
+import { parseRetryAfter, formatRateLimitMessage } from '../utils/errors.js';
 
 const MetaOEmbedSchema = z.object({
   version: z.string().optional(),
@@ -159,6 +160,9 @@ export class InstagramOEmbedProvider implements IMediaProvider {
         }
 
         if (response.status === 429 || errorCode === '4' || errorCode === '17') {
+          const retryHeader = typeof response.headers?.get === 'function' ? response.headers.get('retry-after') : undefined;
+          const retrySeconds = parseRetryAfter(retryHeader);
+          const message = formatRateLimitMessage(retrySeconds);
           return {
             ok: false,
             status: 'provider_error',
@@ -166,7 +170,8 @@ export class InstagramOEmbedProvider implements IMediaProvider {
             shortcode,
             error: {
               code: 'RATE_LIMITED',
-              message: 'Meta oEmbed API rate limit exceeded. Please retry after cooling down.'
+              message,
+              ...(retrySeconds && retrySeconds > 0 ? { retryAfterSeconds: retrySeconds } : {})
             }
           };
         }

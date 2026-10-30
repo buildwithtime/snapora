@@ -96,6 +96,7 @@ export interface ResolveFailure {
     code: ErrorCode;
     message: string;
     details?: string;
+    retryAfterSeconds?: number;
   };
 }
 

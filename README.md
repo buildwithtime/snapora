@@ -1,8 +1,10 @@
 # Snapora ⚡
 
 > **Modern, secure, open-source multi-URL media downloader queue & live preview engine**
+>
+> 🌐 **Initial Public Deployment**: [https://snapora-1r3i.onrender.com/](https://snapora-1r3i.onrender.com/) (Hosted on Render)
 
-[![CI](https://github.com/snapora/snapora/actions/workflows/ci.yml/badge.svg)](https://github.com/snapora/snapora/actions)
+[![CI](https://github.com/buildwithtime/snapora/actions/workflows/ci.yml/badge.svg)](https://github.com/buildwithtime/snapora/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.6-blue.svg)](https://www.typescriptlang.org/)
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev/)
@@ -10,13 +12,11 @@
 
 ---
 
-> [!NOTE]
-> **TRANSPARENCY & PLATFORM COMPLIANCE NOTICE**:
-> Snapora provides two operational provider modes:
-> 1. **Official Live Preview Mode (`InstagramOEmbedProvider`)**: Uses Meta's official oEmbed Graph API to display authenticated author handles, post titles, embed frames, and preview thumbnails for public Instagram posts, reels, and TV links. *Meta's public oEmbed API explicitly does not provide downloadable raw video or image files.*
-> 2. **Offline Demo Mode (`MockProvider`)**: Operates against deterministic simulated fixtures (`picsum.photos` and public sample MP4s) for local offline testing, UI validation, and standalone static deployment.
+> [!IMPORTANT]
+> **LEGAL DISCLAIMER & NON-AFFILIATION NOTICE**:
+> Snapora is an independent open-source tool and is not affiliated with, authorized, maintained, sponsored, or endorsed by Instagram, Meta Platforms, Inc., or any of their affiliates or subsidiaries. All product and company names are trademarks™ or registered® trademarks of their respective holders. Use of them does not imply any affiliation with or endorsement by them.
 >
-> Snapora preserves a strict **Zero-Credential** model and does **not** perform unauthenticated web scraping, anti-bot circumvention, or cookie harvesting.
+> Snapora operates strictly under a **Zero-Credential** model. It does **not** bypass platform authentication, does not access private accounts without explicit authorization, and does not harvest session cookies. Users are responsible for complying with Instagram's Terms of Service and respecting the copyright and intellectual property rights of original media creators.
 
 ---
 
@@ -29,10 +29,19 @@ Snapora is an open-source, client-first media utility engineered for reliability
 - **Sequential Multi-URL Queue**: Add multiple URLs at once (newline-separated or comma-delimited) and process them sequentially with pause, resume, retry, and cancellation controls.
 - **Enhanced Instagram URL Support**: Robust normalization for `/p/`, `/reel/`, `/reels/`, `/tv/`, `m.instagram.com`, `instagr.am`, and direct Meta CDN URLs (`scontent*.cdninstagram.com`), stripping tracking parameters (`?igsh=...`, `?utm_source=...`) and hash fragments.
 - **Formalized Provider Architecture (`IMediaProvider`)**:
-  - `MockProvider`: Offline deterministic simulated fixtures for testing and standalone demo mode.
-  - `InstagramOEmbedProvider`: Permitted official post embed frames, author metadata, and thumbnail previews via Meta Graph API v21.0.
-  - `DirectMediaUrlProvider`: Ingests verified Meta CDN URLs with SSRF DNS pre-flight checks and cryptographic token validation.
-  - `AuthorizedAccountMediaProvider`: Official Meta Business Login OAuth 2.0 integration for creator/business accounts to download their own original media and carousels.
+  - `PublicWebMediaProvider` (`public` — Default): Resolves and streams supported public Instagram posts, Reels, and carousel slides directly without requiring API tokens.
+  - `MockProvider` (`mock`): Offline deterministic simulated fixtures for unit testing, continuous integration, and standalone static demo deployments.
+  - `InstagramOEmbedProvider` (`oembed`): Permitted official post embed frames, author metadata, and thumbnail previews via Meta Graph API v21.0.
+  - `AuthorizedAccountMediaProvider` (`authorized`): Official Meta Business Login OAuth 2.0 integration for creator/business accounts to download their own original media and carousels.
+  - `DirectMediaUrlProvider` (`direct`): Ingests verified Meta CDN URLs with SSRF DNS pre-flight checks and cryptographic token validation.
+- **Genuine Binary Validation**: Validates file magic bytes (JPEG SOI `FF D8 FF`, MP4 `ftyp` box) and rejects disguised HTML/JSON error pages before marking downloads complete.
+- **Carousel Album Traversal**: Structured `CarouselItem` model supporting multi-item previews and independent downloads.
+- **Client-Side Persistence**: Queue state and job history persist in your browser's IndexedDB, keeping your data entirely local.
+- **Standalone Demo Mode**: Can be deployed as a 100% static client on GitHub Pages without requiring a deployed backend server.
+- **Privacy & Security First**:
+  - **Zero Credential Collection**: No Instagram logins, sessions, or passwords needed or stored.
+  - **SSRF Defenses**: Socket-level DNS pre-flight filtering blocking all private RFC1918 subnets, loopback, link-local, multicast, and cloud metadata (`169.254.169.254`) across IPv4 and IPv6.
+  - **No User Tracking**: Stateless backend proxy; zero user database or persistent server telemetry.
 - **Genuine Binary Validation**: Validates file magic bytes (JPEG SOI `FF D8 FF`, MP4 `ftyp` box) and rejects disguised HTML/JSON error pages before marking downloads complete.
 - **Carousel Album Traversal**: Structured `CarouselItem` model supporting multi-item previews and independent downloads.
 - **Client-Side Persistence**: Queue state and job history persist in your browser's IndexedDB, keeping your data entirely local.
@@ -83,7 +92,7 @@ Snapora uses a decoupled architecture designed for static deployment and statele
 ### Installation
 
 ```bash
-git clone https://github.com/snapora/snapora.git
+git clone https://github.com/buildwithtime/snapora.git
 cd snapora
 npm install
 ```
@@ -149,7 +158,7 @@ Copy `.env.example` to `.env` or configure these environment variables in your h
 | `HOST` | No | `0.0.0.0` | Host IP interface to bind to (`0.0.0.0` enables external container access). |
 | `NODE_ENV` | No | `development` | Set to `production` in production to sanitize 500 error messages and optimize Fastify logging. |
 | `DEFAULT_PROVIDER` | No | `public` | Media provider engine: `public` (anonymous web resolver), `mock` (offline fixtures), `oembed`, `authorized`, `direct`. |
-| `CORS_ORIGIN` | No | `true` | Comma-separated allowed origins (e.g. `https://snapora.app`). Leave unset in unified single-service deployments. |
+| `CORS_ORIGIN` | No | `true` | Comma-separated allowed origins (e.g. `https://snapora-1r3i.onrender.com`). Leave unset in unified single-service deployments. |
 | `RATE_LIMIT_MAX` | No | `30` | Maximum requests allowed per IP within the time window. |
 | `RATE_LIMIT_WINDOW_MS` | No | `60000` | Rate limiting sliding window in milliseconds (default: 60s). |
 | `RESOLVER_TIMEOUT_MS` | No | `10000` | Network request timeout for upstream post resolution. |
@@ -161,6 +170,9 @@ Copy `.env.example` to `.env` or configure these environment variables in your h
 ## 🚢 Deploying to Compatible Hosting Platforms
 
 ### Deploying to Render (Web Service)
+
+> **Live Deployment**: Snapora is actively deployed on Render at [https://snapora-1r3i.onrender.com/](https://snapora-1r3i.onrender.com/).
+
 1. Fork or push the repository to GitHub.
 2. In the [Render Dashboard](https://dashboard.render.com/), create a new **Web Service**.
 3. Connect your repository.
@@ -196,6 +208,15 @@ pm2 start "npm start" --name "snapora"
 pm2 save
 pm2 startup
 ```
+
+---
+
+## ⚠️ Known Limitations
+
+* **Private Instagram Content**: Snapora is intentionally designed for public media retrieval. It cannot and will not download posts, reels, or stories from private Instagram accounts without explicit user access tokens via `AuthorizedAccountMediaProvider`.
+* **Ephemeral Instagram Stories**: Stories require active account sessions and are not supported by the public anonymous web resolver.
+* **Upstream Rate Limiting**: Instagram may throttle unauthenticated requests from shared hosting or cloud IP addresses (HTTP 429). Snapora incorporates retry mechanisms and socket-level timeouts, but heavy bulk queues should be processed with reasonable pauses.
+* **Meta oEmbed Preview Scope**: Meta's public oEmbed API supplies embed frames and thumbnail metadata, but does not provide direct raw downloadable media files.
 
 ---
 

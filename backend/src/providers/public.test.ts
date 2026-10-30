@@ -236,7 +236,7 @@ describe('PublicWebMediaProvider Suite', () => {
     }
   });
 
-  it('handles HTTP 429 rate limits gracefully', async () => {
+  it('handles HTTP 429 rate limits gracefully with generic message when Retry-After is absent', async () => {
     vi.spyOn(ssrfClient, 'safeHttpsRequest').mockResolvedValue({
       statusCode: 429,
       headers: {},
@@ -249,6 +249,45 @@ describe('PublicWebMediaProvider Suite', () => {
     if (!res.ok) {
       expect(res.error.code).toBe('RATE_LIMITED');
       expect(res.status).toBe('rate_limited');
+      expect(res.error.message).toBe('Instagram is temporarily limiting requests. Please try again later.');
+      expect(res.error.retryAfterSeconds).toBeUndefined();
+    }
+  });
+
+  it('handles HTTP 429 rate limits with delta-seconds Retry-After header', async () => {
+    vi.spyOn(ssrfClient, 'safeHttpsRequest').mockResolvedValue({
+      statusCode: 429,
+      headers: { 'retry-after': '45' },
+      stream: Readable.from([]) as any,
+      finalUrl: 'https://www.instagram.com/p/rate_limited/'
+    });
+
+    const res = await provider.resolve('https://www.instagram.com/p/rate_limited/', 'rate_limited');
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('RATE_LIMITED');
+      expect(res.status).toBe('rate_limited');
+      expect(res.error.message).toBe('Instagram is temporarily limiting requests. Please try again in 45 seconds.');
+      expect(res.error.retryAfterSeconds).toBe(45);
+    }
+  });
+
+  it('handles HTTP 429 rate limits with HTTP-date Retry-After header', async () => {
+    const futureDate = new Date(Date.now() + 120000).toUTCString();
+    vi.spyOn(ssrfClient, 'safeHttpsRequest').mockResolvedValue({
+      statusCode: 429,
+      headers: { 'retry-after': futureDate },
+      stream: Readable.from([]) as any,
+      finalUrl: 'https://www.instagram.com/p/rate_limited/'
+    });
+
+    const res = await provider.resolve('https://www.instagram.com/p/rate_limited/', 'rate_limited');
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('RATE_LIMITED');
+      expect(res.status).toBe('rate_limited');
+      expect(res.error.message).toMatch(/Instagram is temporarily limiting requests\. Please try again in \d+ minute/);
+      expect(res.error.retryAfterSeconds).toBeGreaterThan(0);
     }
   });
 

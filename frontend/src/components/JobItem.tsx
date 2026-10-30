@@ -266,7 +266,7 @@ export const JobItem: React.FC<JobItemProps> = ({ job }) => {
             case 'RATE_LIMITED':
               return {
                 title: 'Temporarily Rate Limited',
-                detail: 'Instagram is temporarily limiting requests. Please try again later.'
+                detail: err.message || 'Instagram is temporarily limiting requests. Please try again later.'
               };
             case 'TIMEOUT':
               return {

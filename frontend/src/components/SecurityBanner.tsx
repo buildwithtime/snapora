@@ -168,6 +168,41 @@ export const SecurityBanner: React.FC = () => {
               <strong>Operational Server Logging:</strong> The Fastify backend records standard transient HTTP connection logs (timestamp, method, path, response status, and IP for rate limiting) strictly for server reliability and abuse prevention. No user identity profiles are constructed.
             </li>
           </ul>
+
+          <div
+            style={{
+              marginTop: '0.5rem',
+              paddingTop: '0.65rem',
+              borderTop: '1px solid rgba(255, 255, 255, 0.05)',
+              fontSize: '0.75rem',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.35rem'
+            }}
+          >
+            <span>
+              ⚖️ <em>Disclaimer: Snapora is an independent open-source project and is not affiliated with, endorsed by, sponsored by, or associated with Instagram, Meta Platforms, Inc., or any of their affiliates.</em>
+            </span>
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.2rem' }}>
+              <a
+                href="https://github.com/buildwithtime/snapora/blob/main/docs/PRIVACY.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--accent-cyan)', textDecoration: 'none' }}
+              >
+                Full Privacy Policy ↗
+              </a>
+              <a
+                href="https://github.com/buildwithtime/snapora/blob/main/docs/TERMS.md"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: 'var(--accent-cyan)', textDecoration: 'none' }}
+              >
+                Terms of Service ↗
+              </a>
+            </div>
+          </div>
         </div>
       )}
 
@@ -184,7 +219,7 @@ export const SecurityBanner: React.FC = () => {
             color: 'var(--text-muted)'
           }}
         >
-          <span>🛡️ Client-first architecture · Zero credentials collected · Local IndexedDB persistence · SSRF-protected proxy</span>
+          <span>🛡️ Client-first architecture · Zero credentials collected · Local IndexedDB persistence · Not affiliated with Instagram/Meta</span>
           <span>MIT License © Snapora Contributors</span>
         </div>
       )}

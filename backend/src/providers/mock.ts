@@ -38,6 +38,20 @@ export class MockProvider implements IMediaProvider {
       };
     }
 
+    if (lower.includes('ratelimit') || lower.includes('429')) {
+      return {
+        ok: false,
+        status: 'rate_limited',
+        provider: this.name,
+        shortcode,
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'Instagram is temporarily limiting requests. Please try again in 60 seconds.',
+          retryAfterSeconds: 60
+        }
+      };
+    }
+
     if (lower.includes('error')) {
       return {
         ok: false,

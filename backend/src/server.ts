@@ -9,7 +9,7 @@ import { config } from './config/index.js';
 import { healthRoutes } from './routes/health.js';
 import { resolveRoutes } from './routes/resolve.js';
 import { downloadRoutes } from './routes/download.js';
-import { createErrorResponse } from './utils/errors.js';
+import { createErrorResponse, formatRateLimitMessage } from './utils/errors.js';
 import { IMediaProvider } from './providers/types.js';
 
 export interface BuildServerOptions {
@@ -36,11 +36,36 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     await app.register(rateLimit, {
       max: config.rateLimitMax,
       timeWindow: config.rateLimitWindowMs,
-      errorResponseBuilder: () => {
-        return createErrorResponse('RATE_LIMITED', 'Too many requests. Please slow down.');
+      errorResponseBuilder: (_request, context) => {
+        const retryAfterSeconds = typeof (context as any)?.after === 'number'
+          ? Math.ceil((context as any).after / 1000)
+          : typeof (context as any)?.ttl === 'number'
+          ? Math.ceil((context as any).ttl / 1000)
+          : null;
+        const message = formatRateLimitMessage(retryAfterSeconds);
+        return createErrorResponse(
+          'RATE_LIMITED',
+          message,
+          undefined,
+          retryAfterSeconds && retryAfterSeconds > 0 ? retryAfterSeconds : undefined
+        );
       }
     });
   }
+
+  // Security Headers (defense-in-depth without external dependencies)
+  app.addHook('onSend', async (request, reply) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('X-Frame-Options', 'SAMEORIGIN');
+    reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
+    reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
+    const reqUrl = request.raw.url || request.url || '';
+    if (reqUrl.startsWith('/api')) {
+      reply.header('Cache-Control', 'no-store, no-cache, must-revalidate');
+      reply.header('Pragma', 'no-cache');
+    }
+  });
 
   // Safe global error handler (never leaks stack traces to caller)
   app.setErrorHandler((error, request, reply) => {
@@ -64,7 +89,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await app.register(downloadRoutes);
 
   // Serve compiled frontend when dist directory exists (single-service deployment)
-  if (options.serveStatic !== false && config.nodeEnv !== 'test') {
+  if (options.serveStatic === true || (options.serveStatic !== false && config.nodeEnv !== 'test')) {
     const currentDir = path.dirname(fileURLToPath(import.meta.url));
     const candidateDirs = [
       path.resolve(process.cwd(), 'frontend/dist'),

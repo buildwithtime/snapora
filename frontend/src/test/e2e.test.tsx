@@ -331,4 +331,51 @@ describe('Snapora End-to-End & Scenario Validation Suite', () => {
     expect(screen.getByText('FIRST_URL')).toBeDefined();
     expect(screen.getByText('SECOND_URL')).toBeDefined();
   });
+
+  it('Scenario: Rate limit error with retry delay propagates formatted message to UI', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: {
+        get: (h: string) => (h.toLowerCase() === 'content-type' ? 'application/json' : null)
+      },
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            ok: false,
+            error: {
+              code: 'RATE_LIMITED',
+              message: 'Instagram is temporarily limiting requests. Please try again in 45 seconds.',
+              retryAfterSeconds: 45
+            }
+          })
+        ),
+      json: () =>
+        Promise.resolve({
+          ok: false,
+          error: {
+            code: 'RATE_LIMITED',
+            message: 'Instagram is temporarily limiting requests. Please try again in 45 seconds.',
+            retryAfterSeconds: 45
+          }
+        })
+    });
+
+    render(<App />);
+
+    const textarea = screen.getByPlaceholderText(/Paste your Instagram link/i);
+    const addButton = screen.getByText('Fetch Media');
+
+    fireEvent.change(textarea, {
+      target: { value: 'https://www.instagram.com/p/RATE_LIMITED_POST/' }
+    });
+    fireEvent.click(addButton);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Temporarily Rate Limited/)).toBeDefined();
+      expect(
+        screen.getByText(/Instagram is temporarily limiting requests\. Please try again in 45 seconds\./)
+      ).toBeDefined();
+    });
+  });
 });

@@ -1,6 +1,7 @@
 import { IMediaProvider, ResolveResult, ProviderCapabilities, CarouselItem, MediaItem, ResolveOptions } from './types.js';
 import { z } from 'zod';
 import { config } from '../config/index.js';
+import { parseRetryAfter, formatRateLimitMessage } from '../utils/errors.js';
 
 const GraphApiMediaItemSchema = z.object({
   id: z.string(),
@@ -106,6 +107,23 @@ export class AuthorizedAccountMediaProvider implements IMediaProvider {
       clearTimeout(timeoutHandle);
 
       if (!response.ok) {
+        if (response.status === 429) {
+          const retryHeader = typeof response.headers?.get === 'function' ? response.headers.get('retry-after') : undefined;
+          const retrySeconds = parseRetryAfter(retryHeader);
+          const message = formatRateLimitMessage(retrySeconds);
+          return {
+            ok: false,
+            status: 'rate_limited',
+            provider: this.name,
+            shortcode,
+            error: {
+              code: 'RATE_LIMITED',
+              message,
+              ...(retrySeconds && retrySeconds > 0 ? { retryAfterSeconds: retrySeconds } : {})
+            }
+          };
+        }
+
         if (response.status === 401 || response.status === 403) {
           return {
             ok: false,
