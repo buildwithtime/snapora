@@ -154,6 +154,13 @@ describe('Frontend URL Validator', () => {
     expect(res.directMediaInfo?.hasCryptoTokens).toBe(true);
     expect(res.directMediaInfo?.expiresAtUnixHex).toBe('65abcdef');
     expect(res.normalizedUrl).toBe(cdnUrl);
+
+    // Video CDN hostname
+    const videoCdnUrl = 'https://video-iad3-1.cdninstagram.com/o1/v/t2/f2/m86/video.mp4?_nc_cat=102&oh=998877&oe=65abcdef';
+    const videoRes = parseInstagramUrl(videoCdnUrl);
+    expect(videoRes.valid).toBe(true);
+    expect(videoRes.mediaType).toBe('direct_media');
+    expect(videoRes.directMediaInfo?.extension).toBe('mp4');
   });
 
   it('parses fbcdn.net direct media URLs', () => {

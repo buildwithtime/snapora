@@ -115,13 +115,25 @@ describe('SSRF Client & Connection-Level Rebinding Defense Suite', () => {
     it('permits verified Meta CDN hostnames', () => {
       expect(defaultIsAllowedHost('scontent-iad3-1.cdninstagram.com')).toBe(true);
       expect(defaultIsAllowedHost('scontent.cdninstagram.com')).toBe(true);
+      expect(defaultIsAllowedHost('video-iad3-1.cdninstagram.com')).toBe(true);
+      expect(defaultIsAllowedHost('video.cdninstagram.com')).toBe(true);
+      expect(defaultIsAllowedHost('video-ort2-1.cdninstagram.com')).toBe(true);
       expect(defaultIsAllowedHost('instagram.fdel1-1.fna.fbcdn.net')).toBe(true);
+      expect(defaultIsAllowedHost('scontent.fdel1-2.fna.fbcdn.net')).toBe(true);
     });
 
     it('strictly rejects lookalike or arbitrary domains', () => {
       expect(defaultIsAllowedHost('attacker.com')).toBe(false);
       expect(defaultIsAllowedHost('instagram.com.attacker.com')).toBe(false);
       expect(defaultIsAllowedHost('evil-instagram.com')).toBe(false);
+      expect(defaultIsAllowedHost('evil-cdninstagram.com')).toBe(false);
+      expect(defaultIsAllowedHost('cdninstagram.com.attacker.com')).toBe(false);
+      expect(defaultIsAllowedHost('video-cdninstagram.attacker.com')).toBe(false);
+      expect(defaultIsAllowedHost('notcdninstagram.com')).toBe(false);
+      expect(defaultIsAllowedHost('fbcdn.net.attacker.com')).toBe(false);
+      expect(defaultIsAllowedHost('127.0.0.1')).toBe(false);
+      expect(defaultIsAllowedHost('169.254.169.254')).toBe(false);
+      expect(defaultIsAllowedHost('localhost')).toBe(false);
     });
   });
 });

@@ -51,6 +51,8 @@ describe('Backend Instagram URL Parser', () => {
   it('recognizes CDN host patterns correctly', () => {
     expect(isInstagramCdnHostname('scontent-iad3-1.cdninstagram.com')).toBe(true);
     expect(isInstagramCdnHostname('scontent.cdninstagram.com')).toBe(true);
+    expect(isInstagramCdnHostname('video-iad3-1.cdninstagram.com')).toBe(true);
+    expect(isInstagramCdnHostname('video.cdninstagram.com')).toBe(true);
     expect(isInstagramCdnHostname('instagram.fdel1-1.fna.fbcdn.net')).toBe(true);
     expect(isInstagramCdnHostname('evil-cdninstagram.com')).toBe(false);
     expect(isInstagramCdnHostname('cdninstagram.com.attacker.com')).toBe(false);

@@ -390,4 +390,102 @@ describe('Snapora Backend API & Security Suite', () => {
       }
     });
   });
+
+  describe('CORS Preflight & Origin Access Control Suite', () => {
+    let strictProdApp: FastifyInstance;
+
+    beforeAll(async () => {
+      strictProdApp = await buildServer({
+        provider: new MockProvider(),
+        enableRateLimit: false,
+        corsOrigin: ['https://snapora-1r3i.onrender.com', 'https://snapora-pr-42.onrender.com']
+      });
+      await strictProdApp.ready();
+    });
+
+    afterAll(async () => {
+      await strictProdApp.close();
+    });
+
+    it('handles OPTIONS preflight correctly for approved production origin', async () => {
+      const response = await strictProdApp.inject({
+        method: 'OPTIONS',
+        url: '/api/resolve',
+        headers: {
+          origin: 'https://snapora-1r3i.onrender.com',
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'Content-Type, Authorization'
+        }
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers['access-control-allow-origin']).toBe('https://snapora-1r3i.onrender.com');
+      expect(response.headers['access-control-allow-credentials']).toBe('true');
+      expect(response.headers['access-control-allow-methods']).toContain('POST');
+      expect(response.headers['access-control-allow-headers']).toContain('Authorization');
+      expect(response.headers['access-control-allow-headers']).toContain('Content-Type');
+      expect(response.headers['access-control-max-age']).toBe('86400');
+    });
+
+    it('handles OPTIONS preflight correctly for approved preview origin', async () => {
+      const response = await strictProdApp.inject({
+        method: 'OPTIONS',
+        url: '/api/resolve',
+        headers: {
+          origin: 'https://snapora-pr-42.onrender.com',
+          'access-control-request-method': 'POST'
+        }
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers['access-control-allow-origin']).toBe('https://snapora-pr-42.onrender.com');
+      expect(response.headers['access-control-allow-credentials']).toBe('true');
+    });
+
+    it('rejects CORS for unauthorized attacker origin without reflecting origin header', async () => {
+      const response = await strictProdApp.inject({
+        method: 'OPTIONS',
+        url: '/api/resolve',
+        headers: {
+          origin: 'https://attacker.evil.com',
+          'access-control-request-method': 'POST'
+        }
+      });
+
+      // For unapproved origins, Fastify CORS does not set access-control-allow-origin
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    });
+
+    it('includes credentials and explicit origin header on actual API requests from approved origin', async () => {
+      const response = await strictProdApp.inject({
+        method: 'POST',
+        url: '/api/resolve',
+        headers: {
+          origin: 'https://snapora-1r3i.onrender.com'
+        },
+        payload: {
+          url: 'https://www.instagram.com/p/C8XYZ123/'
+        }
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['access-control-allow-origin']).toBe('https://snapora-1r3i.onrender.com');
+      expect(response.headers['access-control-allow-credentials']).toBe('true');
+    });
+
+    it('does not grant CORS access to actual API requests from unapproved origin', async () => {
+      const response = await strictProdApp.inject({
+        method: 'POST',
+        url: '/api/resolve',
+        headers: {
+          origin: 'https://attacker.evil.com'
+        },
+        payload: {
+          url: 'https://www.instagram.com/p/C8XYZ123/'
+        }
+      });
+
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    });
+  });
 });

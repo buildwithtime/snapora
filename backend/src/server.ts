@@ -17,6 +17,7 @@ export interface BuildServerOptions {
   provider?: IMediaProvider;
   enableRateLimit?: boolean;
   serveStatic?: boolean;
+  corsOrigin?: string[] | boolean;
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
@@ -28,8 +29,11 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
 
   // Security: CORS
   await app.register(cors, {
-    origin: config.corsOrigin,
-    methods: ['GET', 'POST', 'OPTIONS']
+    origin: options.corsOrigin !== undefined ? options.corsOrigin : config.corsOrigin,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+    credentials: true,
+    maxAge: 86400
   });
 
   // Security: Rate limiting

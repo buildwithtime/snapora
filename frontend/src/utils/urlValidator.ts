@@ -77,9 +77,10 @@ export const TRACKING_PARAMS = new Set([
 
 export function isInstagramCdnHostname(hostname: string): boolean {
   const lower = hostname.toLowerCase().replace(/\.+$/, '');
+  // Matches *.cdninstagram.com (photos, videos, reels, thumbnails) or *.fbcdn.net
   return (
-    /^scontent[a-zA-Z0-9.-]*\.cdninstagram\.com$/.test(lower) ||
-    /^[a-zA-Z0-9.-]*\.fbcdn\.net$/.test(lower)
+    /^[a-zA-Z0-9.-]+\.cdninstagram\.com$/.test(lower) ||
+    /^[a-zA-Z0-9.-]+\.fbcdn\.net$/.test(lower)
   );
 }
 
