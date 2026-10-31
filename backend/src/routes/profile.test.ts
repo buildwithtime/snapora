@@ -215,5 +215,57 @@ describe('POST /api/profile/discover', () => {
     const body = res.json();
     expect(body.ok).toBe(false);
   });
+
+  it('enforces server-side ceiling of 500 items and disables hasMore if provider returns over-limit items', async () => {
+    // Construct mock provider returning 550 items
+    const manyItems = Array.from({ length: 550 }, (_, i) => ({
+      id: `item_${i}`,
+      shortcode: `code_${i}`,
+      type: 'image' as const,
+      url: `https://www.instagram.com/p/code_${i}/`,
+      thumbnailUrl: `https://cdn.example.com/thumb_${i}.jpg`,
+      displayUrl: `https://cdn.example.com/disp_${i}.jpg`
+    }));
+
+    const mockProvider = {
+      id: 'mock',
+      name: 'MockProvider',
+      getCapabilities: () => ({
+        supportsPreview: true,
+        supportsMetadata: true,
+        supportsOriginalDownload: true,
+        supportsCarousel: true,
+        requiresAuthentication: false,
+        requiresConfiguration: false,
+        supportsProfileDiscovery: true
+      }),
+      canResolve: () => true,
+      resolve: async () => ({ ok: false } as any),
+      canDiscoverProfile: () => true,
+      discoverProfile: async () => ({
+        ok: true,
+        provider: 'MockProvider',
+        profile: { username: 'test_user', isPrivate: false, isVerified: false, mediaCount: 600 },
+        items: manyItems,
+        pagination: { hasMore: true, nextCursor: 'next_page' }
+      })
+    };
+
+    const localApp = await buildServer({ provider: mockProvider as any, enableRateLimit: false });
+    const res = await localApp.inject({
+      method: 'POST',
+      url: '/api/profile/discover',
+      payload: {
+        url: 'https://www.instagram.com/test_user/'
+      }
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.ok).toBe(true);
+    expect(body.items).toHaveLength(500);
+    expect(body.pagination.hasMore).toBe(false);
+    await localApp.close();
+  });
 });
 

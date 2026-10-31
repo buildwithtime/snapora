@@ -419,21 +419,24 @@ export const QueueControls: React.FC = () => {
       {/* Completed Download Summary Banner */}
       {!isDownloadingAll && stats && stats.total > 0 && (
         <div
+          role={stats.error || stats.failed > 0 ? 'alert' : 'status'}
           style={{
             padding: '0.75rem 1rem',
             borderRadius: 'var(--radius-sm)',
             fontSize: '0.82rem',
             fontWeight: 500,
-            background: stats.failed === 0 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
-            color: stats.failed === 0 ? '#34d399' : '#fbbf24',
-            border: `1px solid ${stats.failed === 0 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
+            background: stats.error ? 'rgba(239, 68, 68, 0.12)' : stats.failed === 0 ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+            color: stats.error ? '#f87171' : stats.failed === 0 ? '#34d399' : '#fbbf24',
+            border: `1px solid ${stats.error ? 'rgba(239, 68, 68, 0.3)' : stats.failed === 0 ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.3)'}`,
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center'
           }}
         >
           <span>
-            {stats.mode === 'zip'
+            {stats.error ? (
+              `⚠️ ${stats.error}`
+            ) : stats.mode === 'zip'
               ? stats.failed === 0
                 ? `✓ Successfully created ZIP archive (${stats.completed} media items downloaded as ${
                     stats.archiveName || 'archive.zip'

@@ -83,6 +83,14 @@ export async function profileRoutes(app: FastifyInstance, options?: { provider?:
           userAccessToken
         });
 
+        // Enforce server-side ceiling of 500 items per response to protect memory
+        if (result.ok && Array.isArray(result.items) && result.items.length > 500) {
+          result.items = result.items.slice(0, 500);
+          if (result.pagination) {
+            result.pagination.hasMore = false;
+          }
+        }
+
         if (!result.ok) {
           const status =
             result.error.code === 'AUTHENTICATION_REQUIRED' || result.error.code === 'AUTHENTICATION_ERROR'
@@ -92,8 +100,10 @@ export async function profileRoutes(app: FastifyInstance, options?: { provider?:
                 result.error.code === 'HTTP_403_FORBIDDEN' ||
                 result.error.code === 'LOGIN_WALL_ENCOUNTERED'
               ? 403
-              : result.error.code === 'CONTENT_UNAVAILABLE' || result.error.code === 'POST_NOT_FOUND'
+              : result.error.code === 'CONTENT_UNAVAILABLE' || result.error.code === 'POST_NOT_FOUND' || result.error.code === 'METADATA_NOT_FOUND'
               ? 404
+              : result.error.code === 'EXPIRED_MEDIA_URL' || result.error.code === 'MEDIA_URL_EXPIRED'
+              ? 410
               : result.error.code === 'RATE_LIMITED' || result.error.code === 'HTTP_429_RATE_LIMITED'
               ? 429
               : result.error.code === 'PROVIDER_NOT_CONFIGURED' || result.error.code === 'CONFIGURATION_REQUIRED'

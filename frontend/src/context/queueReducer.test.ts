@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { QueueState } from '../types/queue.js';
-import { queueReducer } from './QueueContext.js';
+import { queueReducer, isMediaUrlExpired } from './QueueContext.js';
 
 describe('Queue State Machine Transitions', () => {
   const initialState: QueueState = {
@@ -365,5 +365,157 @@ describe('Queue State Machine Transitions', () => {
     expect(state.downloadAllStats?.total).toBe(5);
     expect(state.downloadAllStats?.completed).toBe(2);
     expect(state.downloadAllStats?.currentFilename).toBe('photo_3.jpg');
+  });
+
+  it('handles REFRESH_JOB_MEDIA action to update URLs and clear error states', () => {
+    const failedState: QueueState = {
+      jobs: [
+        {
+          id: 'job_refresh_1',
+          url: 'https://instagram.com/p/REF123/',
+          normalizedUrl: 'https://www.instagram.com/p/REF123/',
+          shortcode: 'REF123',
+          status: 'failed',
+          createdAt: 100,
+          retryCount: 1,
+          error: { code: 'EXPIRED_MEDIA_URL', message: 'Expired' },
+          media: [
+            { id: 'm1', type: 'image', url: 'https://cdn.example.com/stale.jpg', filename: 'photo.jpg', status: 'failed' }
+          ]
+        }
+      ],
+      isPaused: false,
+      activeJobId: null
+    };
+
+    const refreshedState = queueReducer(failedState, {
+      type: 'REFRESH_JOB_MEDIA',
+      payload: {
+        jobId: 'job_refresh_1',
+        media: [
+          { id: 'm1', type: 'image', url: 'https://cdn.example.com/fresh.jpg', filename: 'photo.jpg', status: 'pending' }
+        ]
+      }
+    });
+
+    expect(refreshedState.jobs[0].media?.[0].url).toBe('https://cdn.example.com/fresh.jpg');
+    expect(refreshedState.jobs[0].media?.[0].status).toBe('pending');
+    expect(refreshedState.jobs[0].error).toBeUndefined();
+    expect(refreshedState.jobs[0].status).toBe('ready');
+  });
+
+  describe('isMediaUrlExpired utility', () => {
+    it('returns false when URL does not contain an oe parameter', () => {
+      expect(isMediaUrlExpired('https://example.com/photo.jpg')).toBe(false);
+      expect(isMediaUrlExpired('')).toBe(false);
+      expect(isMediaUrlExpired(undefined)).toBe(false);
+    });
+
+    it('returns true when oe hex timestamp has expired in the past', () => {
+      // 1000 seconds in the past
+      const pastSec = Math.floor(Date.now() / 1000) - 1000;
+      const pastHex = pastSec.toString(16);
+      const expiredUrl = `https://scontent.cdninstagram.com/v/t51/photo.jpg?oh=abc&oe=${pastHex}`;
+      expect(isMediaUrlExpired(expiredUrl)).toBe(true);
+    });
+
+    it('returns true when oe timestamp expires within 60 seconds (safety margin)', () => {
+      // 30 seconds into the future (within the 60s buffer)
+      const nearSec = Math.floor(Date.now() / 1000) + 30;
+      const nearHex = nearSec.toString(16);
+      const nearUrl = `https://scontent.cdninstagram.com/v/t51/photo.jpg?oh=abc&oe=${nearHex}`;
+      expect(isMediaUrlExpired(nearUrl)).toBe(true);
+    });
+
+    it('returns false when oe timestamp is comfortably in the future', () => {
+      // 24 hours into the future
+      const futureSec = Math.floor(Date.now() / 1000) + 86400;
+      const futureHex = futureSec.toString(16);
+      const freshUrl = `https://scontent.cdninstagram.com/v/t51/photo.jpg?oh=abc&oe=${futureHex}`;
+      expect(isMediaUrlExpired(freshUrl)).toBe(false);
+    });
+  });
+
+  describe('Bounded Retry & Refresh Guarantees', () => {
+    it('updates carousel items and media simultaneously on REFRESH_JOB_MEDIA', () => {
+      const state: QueueState = {
+        jobs: [
+          {
+            id: 'job_carousel',
+            url: 'https://instagram.com/p/CAROUSEL1/',
+            normalizedUrl: 'https://www.instagram.com/p/CAROUSEL1/',
+            shortcode: 'CAROUSEL1',
+            status: 'failed',
+            createdAt: 100,
+            retryCount: 1,
+            media: [
+              { id: 'm1', type: 'image', url: 'https://cdn.example.com/stale_slide1.jpg', filename: 'slide1.jpg' }
+            ],
+            carouselItems: [
+              { id: 'c1', index: 0, type: 'image', url: 'https://cdn.example.com/stale_slide1.jpg', filename: 'slide1.jpg' },
+              { id: 'c2', index: 1, type: 'video', url: 'https://cdn.example.com/stale_slide2.mp4', filename: 'slide2.mp4' }
+            ]
+          }
+        ],
+        isPaused: false,
+        activeJobId: null
+      };
+
+      const refreshed = queueReducer(state, {
+        type: 'REFRESH_JOB_MEDIA',
+        payload: {
+          jobId: 'job_carousel',
+          media: [
+            { id: 'm1', type: 'image', url: 'https://cdn.example.com/fresh_slide1.jpg', filename: 'slide1.jpg' }
+          ],
+          carouselItems: [
+            { id: 'c1', index: 0, type: 'image', url: 'https://cdn.example.com/fresh_slide1.jpg', filename: 'slide1.jpg' },
+            { id: 'c2', index: 1, type: 'video', url: 'https://cdn.example.com/fresh_slide2.mp4', filename: 'slide2.mp4' }
+          ]
+        }
+      });
+
+      expect(refreshed.jobs[0].media?.[0].url).toBe('https://cdn.example.com/fresh_slide1.jpg');
+      expect(refreshed.jobs[0].carouselItems?.[0].url).toBe('https://cdn.example.com/fresh_slide1.jpg');
+      expect(refreshed.jobs[0].carouselItems?.[1].url).toBe('https://cdn.example.com/fresh_slide2.mp4');
+      expect(refreshed.jobs[0].status).toBe('ready');
+      expect(refreshed.jobs[0].error).toBeUndefined();
+    });
+
+    it('strictly bounds retry counter and only transitions failed jobs', () => {
+      const state: QueueState = {
+        jobs: [
+          {
+            id: 'job_bounds',
+            url: 'https://instagram.com/p/TEST_BOUNDS/',
+            normalizedUrl: 'https://www.instagram.com/p/TEST_BOUNDS/',
+            shortcode: 'TEST_BOUNDS',
+            status: 'failed',
+            createdAt: 100,
+            retryCount: 2,
+            error: { code: 'HTTP_403_FORBIDDEN', message: 'Forbidden' }
+          }
+        ],
+        isPaused: false,
+        activeJobId: null
+      };
+
+      const retried = queueReducer(state, {
+        type: 'RETRY_JOB',
+        payload: { jobId: 'job_bounds' }
+      });
+
+      expect(retried.jobs[0].status).toBe('queued');
+      expect(retried.jobs[0].retryCount).toBe(3);
+      expect(retried.jobs[0].error).toBeUndefined();
+
+      // Attempting to retry an already queued job must NOT increment retryCount or re-trigger
+      const retriedAgain = queueReducer(retried, {
+        type: 'RETRY_JOB',
+        payload: { jobId: 'job_bounds' }
+      });
+      expect(retriedAgain.jobs[0].status).toBe('queued');
+      expect(retriedAgain.jobs[0].retryCount).toBe(3);
+    });
   });
 });

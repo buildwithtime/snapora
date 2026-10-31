@@ -21,7 +21,13 @@ export type ErrorCode =
   | 'HTTP_403_FORBIDDEN'
   | 'HTTP_429_RATE_LIMITED'
   | 'POST_NOT_FOUND'
-  | 'LOGIN_WALL_ENCOUNTERED';
+  | 'EXPIRED_MEDIA_URL'
+  | 'LOGIN_WALL_ENCOUNTERED'
+  | 'METADATA_NOT_FOUND'
+  | 'PAGE_FETCH_FAILED'
+  | 'MEDIA_URL_EXPIRED'
+  | 'CDN_REQUEST_FAILED'
+  | 'STREAM_INTERRUPTED';
 
 export interface ApiErrorResponse {
   ok: false;

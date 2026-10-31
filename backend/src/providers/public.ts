@@ -149,8 +149,12 @@ export class PublicWebMediaProvider implements IMediaProvider {
       }
       const html = Buffer.concat(chunks).toString('utf8');
 
-      // Check if redirected to login page indicating private post
-      if (safeResponse.finalUrl.includes('/accounts/login/') || html.includes('login_page') && !html.includes('xig_polaris_media')) {
+      // Check if redirected to login page indicating private post or login wall
+      const isLoginRedirect =
+        safeResponse.finalUrl.includes('/accounts/login') ||
+        (html.includes('login_page') && !html.includes('xig_polaris_media'));
+
+      if (isLoginRedirect) {
         return {
           ok: false,
           status: 'authentication_required',
@@ -159,6 +163,25 @@ export class PublicWebMediaProvider implements IMediaProvider {
           error: {
             code: 'CONTENT_PRIVATE',
             message: 'This post belongs to a private account or requires Instagram login.'
+          }
+        };
+      }
+
+      const isLoginWall =
+        html.includes('/accounts/login/') ||
+        html.includes('Login • Instagram') ||
+        html.includes('"require_login":true') ||
+        html.includes('login-box');
+
+      if (isLoginWall) {
+        return {
+          ok: false,
+          status: 'authentication_required',
+          provider: this.id,
+          shortcode,
+          error: {
+            code: 'LOGIN_WALL_ENCOUNTERED',
+            message: 'Instagram requires account authorization to view this post. Connect an authorized Meta account or provide an access token.'
           }
         };
       }
@@ -193,13 +216,14 @@ export class PublicWebMediaProvider implements IMediaProvider {
       }
 
       const msg = err instanceof Error ? err.message : 'Unknown network failure';
+      const isPageFetchFailed = msg.includes('ENOTFOUND') || msg.includes('ECONNREFUSED') || msg.includes('ECONNRESET');
       return {
         ok: false,
         status: 'provider_error',
         provider: this.id,
         shortcode,
         error: {
-          code: 'NETWORK_ERROR',
+          code: isPageFetchFailed ? 'PAGE_FETCH_FAILED' : 'NETWORK_ERROR',
           message: `Failed to resolve post from Instagram web: ${msg}`
         }
       };
@@ -441,13 +465,32 @@ export class PublicWebMediaProvider implements IMediaProvider {
       };
     }
 
+    const isClientShell =
+      html.includes('Polaris') ||
+      html.includes('requireLazy') ||
+      html.includes('CAAIGLoginHomepage') ||
+      (html.includes('<title>Instagram</title>') && !html.includes('shortcode_media'));
+
+    if (isClientShell) {
+      return {
+        ok: false,
+        status: 'authentication_required',
+        provider: this.id,
+        shortcode,
+        error: {
+          code: 'LOGIN_WALL_ENCOUNTERED',
+          message: 'Instagram served an unauthenticated web shell requiring login to view this post. Connect an authorized Meta account or provide an access token.'
+        }
+      };
+    }
+
     return {
       ok: false,
       status: 'unsupported_content',
       provider: this.id,
       shortcode,
       error: {
-        code: 'CONTENT_UNAVAILABLE',
+        code: 'METADATA_NOT_FOUND',
         message: 'Could not extract media metadata from the public Instagram page.'
       }
     };

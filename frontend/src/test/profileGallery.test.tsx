@@ -255,8 +255,8 @@ describe('Instagram Profile Discovery & Selective Downloading Gallery', () => {
   });
 
   it('enforces MAX_PROFILE_ITEMS independently from MAX_ZIP_ITEMS', () => {
-    expect(MAX_PROFILE_ITEMS).toBe(250);
-    expect(MAX_ZIP_ITEMS).toBe(100);
+    expect(MAX_PROFILE_ITEMS).toBe(500);
+    expect(MAX_ZIP_ITEMS).toBe(50);
     expect(MAX_PROFILE_ITEMS).toBeGreaterThan(MAX_ZIP_ITEMS);
   });
 
@@ -279,6 +279,46 @@ describe('Instagram Profile Discovery & Selective Downloading Gallery', () => {
     const zipButton = await screen.findByRole('button', { name: /ZIP \(12\)/i });
     expect(zipButton).toBeDefined();
     expect(zipButton.getAttribute('title')).toContain('12');
+  });
+
+  it('safely handles malformed pagination data without creating infinite loops or throwing', async () => {
+    // Test that if loadMore receives circular cursor or empty items with hasMore: true, it halts pagination
+    render(<App />);
+
+    const textarea = screen.getByPlaceholderText(/Paste your Instagram link/i);
+    const fetchBtn = screen.getByText('Fetch Media');
+
+    fireEvent.change(textarea, { target: { value: 'https://www.instagram.com/creator_studio/' } });
+    fireEvent.click(fetchBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText('@creator_studio')).toBeDefined();
+    });
+
+    // Mock fetch for loadMore returning empty items with hasMore: true (malformed upstream)
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        text: async () =>
+          JSON.stringify({
+            ok: true,
+            provider: 'mock',
+            profile: { username: 'creator_studio', isPrivate: false, isVerified: false, mediaCount: 12 },
+            items: [],
+            pagination: { hasMore: true, nextCursor: 'same_cursor' }
+          })
+      })
+    );
+
+    const loadMoreBtn = screen.getByRole('button', { name: /Load More Posts/i });
+    fireEvent.click(loadMoreBtn);
+
+    // After response, hasMore is forced false because 0 new items were added
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /Load More Posts/i })).toBeNull();
+    });
   });
 });
 

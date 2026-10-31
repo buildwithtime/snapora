@@ -67,7 +67,7 @@ export type ProfileFilterType = 'all' | 'image' | 'video' | 'carousel';
  * Maximum number of posts discoverable in one profile gallery session
  * to prevent browser DOM lag and memory pressure on large profiles.
  */
-export const MAX_PROFILE_ITEMS = 250;
+export const MAX_PROFILE_ITEMS = 500;
 
 export interface ProfileGalleryState {
   isOpen: boolean;

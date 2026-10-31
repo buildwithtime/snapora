@@ -67,6 +67,12 @@ export function mapHttpStatusToError(status: number, rawSnippet?: string): ApiEr
         message: 'The requested post or Reel could not be found.',
         status
       };
+    case 410:
+      return {
+        code: 'MEDIA_URL_EXPIRED',
+        message: 'The temporary signed download link has expired. Please retry to refresh the URL.',
+        status
+      };
     case 413:
       return {
         code: 'FILE_TOO_LARGE',

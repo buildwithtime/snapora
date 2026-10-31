@@ -75,16 +75,18 @@ function profileGalleryReducer(state: ProfileGalleryState, action: ProfileAction
       };
 
     case 'LOAD_SUCCESS': {
-      const hasMore = action.payload.items.length >= MAX_PROFILE_ITEMS ? false : action.payload.pagination.hasMore;
+      const rawItems = Array.isArray(action.payload.items) ? action.payload.items : [];
+      const validItems = rawItems.filter((i) => i && i.id).slice(0, MAX_PROFILE_ITEMS);
+      const hasMore = validItems.length >= MAX_PROFILE_ITEMS ? false : Boolean(action.payload.pagination?.hasMore);
       return {
         ...state,
         isOpen: true,
         isLoading: false,
         profile: action.payload.profile,
-        items: action.payload.items,
+        items: validItems,
         pagination: {
-          ...action.payload.pagination,
-          hasMore
+          hasMore,
+          nextCursor: hasMore ? action.payload.pagination?.nextCursor : undefined
         },
         error: null
       };
@@ -105,17 +107,27 @@ function profileGalleryReducer(state: ProfileGalleryState, action: ProfileAction
       };
 
     case 'LOAD_MORE_SUCCESS': {
+      const rawItems = Array.isArray(action.payload.items) ? action.payload.items : [];
       const existingIds = new Set(state.items.map((i) => i.id));
-      const newItems = action.payload.items.filter((i) => !existingIds.has(i.id));
-      const combined = [...state.items, ...newItems];
-      const hasMore = combined.length >= MAX_PROFILE_ITEMS ? false : action.payload.pagination.hasMore;
+      const newItems = rawItems.filter((i) => i && i.id && !existingIds.has(i.id));
+      const combined = [...state.items, ...newItems].slice(0, MAX_PROFILE_ITEMS);
+
+      const nextCursor = action.payload.pagination?.nextCursor;
+      const isCircularCursor = Boolean(nextCursor && nextCursor === state.pagination.nextCursor);
+      const isZeroProgress = newItems.length === 0;
+
+      const hasMore =
+        combined.length >= MAX_PROFILE_ITEMS || isCircularCursor || isZeroProgress
+          ? false
+          : Boolean(action.payload.pagination?.hasMore);
+
       return {
         ...state,
         isLoadingMore: false,
         items: combined,
         pagination: {
-          ...action.payload.pagination,
-          hasMore
+          hasMore,
+          nextCursor: hasMore ? nextCursor : undefined
         }
       };
     }

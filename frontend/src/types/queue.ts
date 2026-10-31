@@ -118,6 +118,7 @@ export type DownloadAllStats = {
   mode?: DownloadMode;
   phase?: 'fetching' | 'compressing' | 'completed' | 'cancelled';
   archiveName?: string;
+  error?: string;
 };
 
 export type QueueState = {
@@ -163,6 +164,14 @@ export type QueueAction =
         status: 'pending' | 'downloading' | 'completed' | 'failed';
         progress?: number;
         error?: string;
+      };
+    }
+  | {
+      type: 'REFRESH_JOB_MEDIA';
+      payload: {
+        jobId: string;
+        media: MediaItem[];
+        carouselItems?: CarouselItem[];
       };
     }
   | {
