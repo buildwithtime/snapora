@@ -4,9 +4,16 @@ import { parseBatchUrls } from '../utils/urlValidator.js';
 import { saveJobsToStorage, loadJobsFromStorage } from '../utils/storage.js';
 import { resolveClientMock } from '../utils/mockResolver.js';
 import { generateMediaFilename, FilenameCollisionTracker } from '../utils/filenameGenerator.js';
-import { buildAndDownloadZip } from '../utils/zipDownloader.js';
+import { buildAndDownloadZip, ZipResult, MAX_ZIP_ITEMS } from '../utils/zipDownloader.js';
+import { triggerManagedBlobDownload } from '../utils/blobLifecycle.js';
 import { addRecentDownload } from '../utils/recentHistory.js';
 import { safeFetchJson } from '../utils/apiClient.js';
+
+export interface DownloadAllOptions {
+  retryFailedOnly?: boolean;
+  mode?: DownloadMode;
+  targetJobIds?: string[];
+}
 
 interface QueueContextType {
   state: QueueState;
@@ -14,7 +21,7 @@ interface QueueContextType {
   setUserAccessToken: (token: string) => void;
   downloadMode: DownloadMode;
   setDownloadMode: (mode: DownloadMode) => void;
-  addUrls: (rawText: string) => { addedCount: number; duplicateCount: number; invalidCount: number };
+  addUrls: (rawText: string) => { addedCount: number; duplicateCount: number; invalidCount: number; addedJobIds: string[] };
   pauseQueue: () => void;
   resumeQueue: () => void;
   retryJob: (jobId: string) => void;
@@ -23,7 +30,11 @@ interface QueueContextType {
   clearFailed: () => void;
   triggerDownload: (media: MediaItem) => void;
   downloadMediaItem: (jobId: string, item: MediaItem | CarouselItem) => Promise<boolean>;
-  downloadAll: (jobId?: string, options?: { retryFailedOnly?: boolean; mode?: DownloadMode }) => Promise<void>;
+  downloadAll: (jobId?: string, options?: DownloadAllOptions) => Promise<void>;
+  downloadItemsAsZip: (
+    items: Array<{ jobId: string; item: MediaItem | CarouselItem }>,
+    archivePrefix?: string
+  ) => Promise<ZipResult>;
   cancelDownloadAll: () => void;
 }
 
@@ -41,7 +52,7 @@ export function queueReducer(state: QueueState, action: QueueAction): QueueState
     case 'ADD_JOBS': {
       const now = Date.now();
       const newJobs: QueueJob[] = action.payload.map((item, index) => ({
-        id: `job_${now}_${index}_${Math.random().toString(36).slice(2, 7)}`,
+        id: item.id || `job_${now}_${index}_${Math.random().toString(36).slice(2, 7)}`,
         url: item.url,
         normalizedUrl: item.normalizedUrl,
         shortcode: item.shortcode,
@@ -204,6 +215,22 @@ export function queueReducer(state: QueueState, action: QueueAction): QueueState
         })
       };
 
+    case 'REFRESH_JOB_MEDIA':
+      return {
+        ...state,
+        jobs: state.jobs.map((job) =>
+          job.id === action.payload.jobId
+            ? {
+                ...job,
+                media: action.payload.media,
+                carouselItems: action.payload.carouselItems || job.carouselItems,
+                status: job.status === 'failed' ? 'ready' : job.status,
+                error: undefined
+              }
+            : job
+        )
+      };
+
     case 'SET_DOWNLOAD_ALL_STATS':
       return {
         ...state,
@@ -270,6 +297,21 @@ function applyStandardFilenames(
   });
 
   return { media: normalizedMedia, carouselItems: normalizedCarousel };
+}
+
+export function isMediaUrlExpired(rawUrl?: string): boolean {
+  if (!rawUrl) return false;
+  try {
+    const parsed = new URL(rawUrl);
+    const oe = parsed.searchParams.get('oe');
+    if (!oe) return false;
+    const expiresAtSec = parseInt(oe, 16);
+    if (isNaN(expiresAtSec)) return false;
+    // Buffer by 60 seconds to prevent expiration mid-transfer
+    return Date.now() >= (expiresAtSec - 60) * 1000;
+  } catch {
+    return false;
+  }
 }
 
 export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -515,14 +557,23 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const nonDuplicates = valid.filter((v) => !currentShortcodes.has(v.shortcode));
     const duplicateCount = valid.length - nonDuplicates.length;
 
-    if (nonDuplicates.length > 0) {
-      dispatch({ type: 'ADD_JOBS', payload: nonDuplicates });
+    const now = Date.now();
+    const addedJobIds: string[] = [];
+    const jobsWithIds = nonDuplicates.map((item, index) => {
+      const id = `job_${now}_${index}_${Math.random().toString(36).slice(2, 7)}`;
+      addedJobIds.push(id);
+      return { ...item, id };
+    });
+
+    if (jobsWithIds.length > 0) {
+      dispatch({ type: 'ADD_JOBS', payload: jobsWithIds });
     }
 
     return {
       addedCount: nonDuplicates.length,
       duplicateCount,
-      invalidCount: invalid.length
+      invalidCount: invalid.length,
+      addedJobIds
     };
   };
 
@@ -563,6 +614,61 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const downloadAbortControllerRef = useRef<AbortController | null>(null);
 
+  const refreshJobMedia = async (jobId: string): Promise<QueueJob | null> => {
+    const job = state.jobs.find((j) => j.id === jobId);
+    if (!job || isDemoMode) return job || null;
+
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (userAccessToken) {
+        headers['Authorization'] = `Bearer ${userAccessToken}`;
+      }
+
+      const apiResult = await safeFetchJson<{
+        ok: boolean;
+        media?: MediaItem[];
+        carouselItems?: CarouselItem[];
+        author?: string;
+        takenAt?: number | string;
+      }>(`${apiBaseUrl}/api/resolve`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          url: job.normalizedUrl,
+          userAccessToken: userAccessToken || undefined
+        })
+      });
+
+      if (apiResult.ok && apiResult.data.ok && apiResult.data.media) {
+        const { media, carouselItems } = applyStandardFilenames(
+          apiResult.data.media,
+          apiResult.data.carouselItems,
+          apiResult.data.author || job.author,
+          job.shortcode,
+          apiResult.data.takenAt || job.takenAt
+        );
+
+        dispatch({
+          type: 'REFRESH_JOB_MEDIA',
+          payload: {
+            jobId: job.id,
+            media,
+            carouselItems
+          }
+        });
+
+        return {
+          ...job,
+          media,
+          carouselItems
+        };
+      }
+    } catch {
+      // Return unrefreshed job on network failure
+    }
+    return job;
+  };
+
   const downloadMediaItem = async (jobId: string, item: MediaItem | CarouselItem): Promise<boolean> => {
     const itemId = item.id || item.filename;
 
@@ -590,11 +696,50 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
 
     try {
+      let currentItem = item;
+
+      // 1. Proactive URL expiration check: If signed URL has expired, refresh metadata before fetching
+      if (!isDemoMode && isMediaUrlExpired(currentItem.url)) {
+        const refreshed = await refreshJobMedia(jobId);
+        if (refreshed) {
+          const freshItem =
+            refreshed.media?.find((m) => m.id === itemId || m.filename === itemId) ||
+            refreshed.carouselItems?.find((c) => c.id === itemId || c.filename === itemId);
+          if (freshItem && freshItem.url) {
+            currentItem = freshItem;
+          }
+        }
+      }
+
       let blob: Blob;
 
-      if (!isDemoMode && (item.url.startsWith('https://scontent') || item.url.includes('cdninstagram') || item.url.includes('fbcdn.net') || item.url.includes('instagram.com'))) {
-        const downloadUrl = `${apiBaseUrl}/api/download?url=${encodeURIComponent(item.url)}&filename=${encodeURIComponent(item.filename)}&expectedType=${encodeURIComponent(item.type)}`;
-        const response = await fetch(downloadUrl);
+      if (!isDemoMode && (currentItem.url.startsWith('https://scontent') || currentItem.url.includes('cdninstagram') || currentItem.url.includes('fbcdn.net') || currentItem.url.includes('instagram.com'))) {
+        let downloadUrl = `${apiBaseUrl}/api/download?url=${encodeURIComponent(currentItem.url)}&filename=${encodeURIComponent(currentItem.filename)}&expectedType=${encodeURIComponent(currentItem.type)}`;
+        let response = await fetch(downloadUrl);
+
+        // 2. Reactive expiration check: If upstream returned 403 / 410, refresh metadata and retry once
+        if (!response.ok && (response.status === 403 || response.status === 410)) {
+          const refreshed = await refreshJobMedia(jobId);
+          if (refreshed) {
+            const freshItem =
+              refreshed.media?.find((m) => m.id === itemId || m.filename === itemId) ||
+              refreshed.carouselItems?.find((c) => c.id === itemId || c.filename === itemId);
+            if (freshItem && freshItem.url && freshItem.url !== currentItem.url) {
+              currentItem = freshItem;
+              downloadUrl = `${apiBaseUrl}/api/download?url=${encodeURIComponent(currentItem.url)}&filename=${encodeURIComponent(currentItem.filename)}&expectedType=${encodeURIComponent(currentItem.type)}`;
+              response = await fetch(downloadUrl);
+            }
+          }
+        }
+
+        // 3. Handle rate limits with backoff
+        if (response.status === 429) {
+          const retryAfter = parseInt(response.headers.get('retry-after') || '0', 10);
+          if (retryAfter > 0) {
+            await new Promise((r) => setTimeout(r, Math.min(retryAfter, 60) * 1000));
+          }
+        }
+
         if (!response.ok) {
           let errMsg = `Download failed with HTTP ${response.status}`;
           try {
@@ -620,24 +765,15 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         blob = await response.blob();
       } else {
         // Direct or demo mode download
-        const response = await fetch(item.url);
+        const response = await fetch(currentItem.url);
         if (!response.ok) {
           throw new Error(`Direct fetch failed (HTTP ${response.status})`);
         }
         blob = await response.blob();
       }
 
-      // Download actual validated media bytes via object URL
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = item.filename;
-      link.target = '_blank';
-      link.rel = 'noopener noreferrer';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+      // Download actual validated media bytes via managed object URL lifecycle
+      triggerManagedBlobDownload(blob, currentItem.filename);
 
       dispatch({
         type: 'SET_ITEM_DOWNLOAD_STATUS',
@@ -666,7 +802,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const downloadAll = async (
     targetJobId?: string,
-    options?: { retryFailedOnly?: boolean; mode?: DownloadMode }
+    options?: DownloadAllOptions
   ) => {
     // Prevent duplicate concurrent execution
     if (downloadAbortControllerRef.current) {
@@ -675,7 +811,11 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     const retryFailedOnly = Boolean(options?.retryFailedOnly);
     const activeMode = options?.mode || downloadMode;
-    const jobsToProcess = targetJobId
+    const targetJobIds = options?.targetJobIds;
+
+    const jobsToProcess = targetJobIds && targetJobIds.length > 0
+      ? state.jobs.filter((j) => targetJobIds.includes(j.id))
+      : targetJobId
       ? state.jobs.filter((j) => j.id === targetJobId)
       : state.jobs;
 
@@ -723,13 +863,29 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     // --- ZIP MODE BRANCH ---
     if (activeMode === 'zip') {
+      if (itemsToDownload.length > MAX_ZIP_ITEMS) {
+        dispatch({
+          type: 'SET_DOWNLOAD_ALL_STATS',
+          payload: {
+            active: false,
+            mode: 'zip',
+            phase: 'completed',
+            total: itemsToDownload.length,
+            completed: 0,
+            failed: itemsToDownload.length,
+            error: `Queue contains ${itemsToDownload.length} items, which exceeds the maximum archive limit of ${MAX_ZIP_ITEMS} files. Please select individual posts or use 'Download individually'.`
+          }
+        });
+        return;
+      }
+
       const targetJob = targetJobId ? state.jobs.find((j) => j.id === targetJobId) : undefined;
       const archivePrefix = targetJob
         ? `Snapora_${targetJob.author || 'post'}_${targetJob.shortcode}`
         : undefined;
 
       try {
-        await buildAndDownloadZip({
+        const zipResult = await buildAndDownloadZip({
           items: itemsToDownload,
           apiBaseUrl,
           isDemoMode,
@@ -762,6 +918,21 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             });
           }
         });
+
+        if (!zipResult.success) {
+          dispatch({
+            type: 'SET_DOWNLOAD_ALL_STATS',
+            payload: {
+              active: false,
+              mode: 'zip',
+              phase: 'completed',
+              total: itemsToDownload.length,
+              completed: zipResult.completed,
+              failed: zipResult.failed,
+              error: zipResult.error || 'Failed to generate ZIP archive'
+            }
+          });
+        }
       } finally {
         downloadAbortControllerRef.current = null;
       }
@@ -830,6 +1001,59 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     downloadAbortControllerRef.current = null;
   };
 
+  const downloadItemsAsZip = async (
+    customItems: Array<{ jobId: string; item: MediaItem | CarouselItem }>,
+    archivePrefix?: string
+  ): Promise<ZipResult> => {
+    if (downloadAbortControllerRef.current || customItems.length === 0) {
+      return {
+        success: false,
+        archiveName: '',
+        completed: 0,
+        failed: 0,
+        failedItemIds: [],
+        totalBytes: 0,
+        error: customItems.length === 0 ? 'No items selected' : 'Another download operation is currently in progress'
+      };
+    }
+
+    const abortController = new AbortController();
+    downloadAbortControllerRef.current = abortController;
+
+    const batchTracker = new FilenameCollisionTracker();
+    customItems.forEach(({ item }) => {
+      item.filename = batchTracker.getUniqueFilename(item.filename);
+    });
+
+    try {
+      const result = await buildAndDownloadZip({
+        items: customItems,
+        apiBaseUrl,
+        isDemoMode,
+        archivePrefix,
+        signal: abortController.signal,
+        onProgress: (update) => {
+          dispatch({
+            type: 'SET_DOWNLOAD_ALL_STATS',
+            payload: {
+              active: update.phase === 'fetching' || update.phase === 'compressing',
+              mode: 'zip',
+              phase: update.phase,
+              total: update.total,
+              completed: update.completed,
+              failed: update.failed,
+              currentFilename: update.currentFilename,
+              archiveName: update.archiveName
+            }
+          });
+        }
+      });
+      return result;
+    } finally {
+      downloadAbortControllerRef.current = null;
+    }
+  };
+
   const cancelDownloadAll = () => {
     if (downloadAbortControllerRef.current) {
       downloadAbortControllerRef.current.abort();
@@ -865,6 +1089,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         triggerDownload,
         downloadMediaItem,
         downloadAll,
+        downloadItemsAsZip,
         cancelDownloadAll
       }}
     >

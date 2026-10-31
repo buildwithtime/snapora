@@ -190,6 +190,7 @@ describe('mapHttpStatusToError helper', () => {
     expect(mapHttpStatusToError(504).code).toBe('TIMEOUT');
     expect(mapHttpStatusToError(403).code).toBe('PRIVATE_ACCOUNT');
     expect(mapHttpStatusToError(404).code).toBe('POST_NOT_FOUND');
+    expect(mapHttpStatusToError(410).code).toBe('MEDIA_URL_EXPIRED');
     expect(mapHttpStatusToError(502).code).toBe('SERVER_UNAVAILABLE');
     expect(mapHttpStatusToError(500).code).toBe('MALFORMED_RESPONSE');
   });

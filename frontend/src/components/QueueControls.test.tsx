@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { QueueControls } from './QueueControls.js';
 import { QueueProvider } from '../context/QueueContext.js';
 import { QueueJob } from '../types/queue.js';
+import { MAX_ZIP_ITEMS } from '../utils/zipDownloader.js';
 import * as storage from '../utils/storage.js';
 
 vi.mock('../utils/storage.js', () => ({
@@ -133,5 +134,53 @@ describe('QueueControls Dropdown Suite', () => {
     await waitFor(() => {
       expect(screen.queryByRole('menu')).toBeNull();
     });
+  });
+
+  it('displays user-facing error banner when attempting to export ZIP with more than allowed items', async () => {
+    // Generate 105 items across jobs
+    const manyJobs: QueueJob[] = Array.from({ length: 105 }, (_, i) => ({
+      id: `job_many_${i}`,
+      url: `https://www.instagram.com/p/TEST_${i}/`,
+      normalizedUrl: `https://www.instagram.com/p/TEST_${i}/`,
+      shortcode: `TEST_${i}`,
+      status: 'ready',
+      createdAt: Date.now(),
+      retryCount: 0,
+      media: [
+        {
+          id: `media_${i}`,
+          filename: `creator_post_${i}.jpg`,
+          type: 'image',
+          url: `https://scontent.cdninstagram.com/photo_${i}.jpg`,
+          downloadable: true
+        }
+      ]
+    }));
+
+    vi.mocked(storage.loadJobsFromStorage).mockResolvedValue(manyJobs);
+
+    render(
+      <QueueProvider>
+        <QueueControls />
+      </QueueProvider>
+    );
+
+    // Switch to ZIP mode
+    const trigger = await screen.findByLabelText(/Choose download format/i);
+    fireEvent.click(trigger);
+    const zipOption = screen.getByText('📦 Download as ZIP');
+    fireEvent.click(zipOption);
+
+    // Click Download All as ZIP (105)
+    const downloadBtn = await screen.findByRole('button', { name: /Download All as ZIP/i });
+    expect(downloadBtn.textContent).toContain('Download All as ZIP (105)');
+    fireEvent.click(downloadBtn);
+
+    // Error alert banner must be displayed with actionable message
+    const alert = await screen.findByRole('alert');
+    expect(alert).toBeDefined();
+    expect(alert.textContent).toContain('Queue contains 105 items');
+    expect(alert.textContent).toContain(`exceeds the maximum archive limit of ${MAX_ZIP_ITEMS} files`);
+    expect(alert.textContent).toContain('Download individually');
   });
 });

@@ -1,8 +1,9 @@
 import JSZip from 'jszip';
 import { MediaItem, CarouselItem } from '../types/queue.js';
 import { FilenameCollisionTracker, generateZipArchiveFilename } from './filenameGenerator.js';
+import { triggerManagedBlobDownload } from './blobLifecycle.js';
 
-export const MAX_ZIP_ITEMS = 100;
+export const MAX_ZIP_ITEMS = 50;
 export const MAX_ZIP_TOTAL_BYTES = 500 * 1024 * 1024; // 500 MB
 
 export interface ZipProgressUpdate {
@@ -70,13 +71,51 @@ export function validateClientMediaBytes(headerChunk: Uint8Array): {
     return { valid: true, detectedType: 'image/png' };
   }
 
-  // 4. MP4 (ISO Base Media File Format): 'ftyp' at offset 4..7
-  if (
-    headerChunk[4] === 0x66 &&
-    headerChunk[5] === 0x74 &&
-    headerChunk[6] === 0x79 &&
-    headerChunk[7] === 0x70
-  ) {
+  // 4. MP4 (ISO Base Media File Format / QuickTime / WebM)
+  let isIsoBmffVideo = false;
+
+  if (headerChunk.length >= 8) {
+    const box1Size =
+      ((headerChunk[0] << 24) >>> 0) +
+      (headerChunk[1] << 16) +
+      (headerChunk[2] << 8) +
+      headerChunk[3];
+    const box1Type = String.fromCharCode(
+      headerChunk[4],
+      headerChunk[5],
+      headerChunk[6],
+      headerChunk[7]
+    );
+
+    if (box1Type === 'ftyp' && (box1Size >= 8 || box1Size === 0 || box1Size === 1)) {
+      isIsoBmffVideo = true;
+    } else if (
+      (box1Type === 'wide' || box1Type === 'free') &&
+      box1Size >= 8 &&
+      box1Size + 8 <= headerChunk.length
+    ) {
+      const box2Type = String.fromCharCode(
+        headerChunk[box1Size + 4],
+        headerChunk[box1Size + 5],
+        headerChunk[box1Size + 6],
+        headerChunk[box1Size + 7]
+      );
+      if (box2Type === 'ftyp') {
+        isIsoBmffVideo = true;
+      }
+    } else if ((box1Type === 'moov' || box1Type === 'mdat') && box1Size >= 8) {
+      isIsoBmffVideo = true;
+    }
+  }
+
+  const isWebm =
+    headerChunk.length >= 4 &&
+    headerChunk[0] === 0x1a &&
+    headerChunk[1] === 0x45 &&
+    headerChunk[2] === 0xdf &&
+    headerChunk[3] === 0xa3;
+
+  if (isIsoBmffVideo || isWebm) {
     return { valid: true, detectedType: 'video/mp4' };
   }
 
@@ -192,16 +231,7 @@ export async function fetchValidatedMediaBlob(
  * Triggers a browser download of a generated Blob.
  */
 export function triggerBrowserBlobDownload(blob: Blob, filename: string): void {
-  const objectUrl = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = objectUrl;
-  link.download = filename;
-  link.target = '_blank';
-  link.rel = 'noopener noreferrer';
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 2000);
+  triggerManagedBlobDownload(blob, filename);
 }
 
 export interface BuildZipOptions {
@@ -242,6 +272,14 @@ export async function buildAndDownloadZip(options: BuildZipOptions): Promise<Zip
   }
 
   if (items.length > MAX_ZIP_ITEMS) {
+    onProgress?.({
+      phase: 'completed',
+      total: items.length,
+      completed: 0,
+      failed: items.length,
+      archiveName: '',
+      percent: 100
+    });
     return {
       success: false,
       archiveName: '',
@@ -249,7 +287,7 @@ export async function buildAndDownloadZip(options: BuildZipOptions): Promise<Zip
       failed: items.length,
       failedItemIds: items.map((i) => i.item.id || i.item.filename),
       totalBytes: 0,
-      error: `Queue exceeds maximum allowed archive limit of ${MAX_ZIP_ITEMS} items.`
+      error: `Queue exceeds maximum allowed archive limit of ${MAX_ZIP_ITEMS} items (received ${items.length} items). Please download individually or reduce selection.`
     };
   }
 
@@ -316,7 +354,10 @@ export async function buildAndDownloadZip(options: BuildZipOptions): Promise<Zip
       const blob = await fetchValidatedMediaBlob(item, apiBaseUrl, isDemoMode, signal);
 
       if (totalBytes + blob.size > MAX_ZIP_TOTAL_BYTES) {
-        throw new Error(`Total archive size exceeds limit of 500 MB`);
+        failed++;
+        failedItemIds.push(itemId);
+        onItemStatus?.(jobId, itemId, 'failed', 'Total archive size exceeds limit of 500 MB');
+        break;
       }
 
       totalBytes += blob.size;

@@ -274,28 +274,29 @@ export const JobItem: React.FC<JobItemProps> = ({ job }) => {
                 detail: 'The request took too long. You can try again.'
               };
             case 'CONTENT_UNAVAILABLE':
+            case 'METADATA_NOT_FOUND':
             case 'NO_MEDIA':
               return {
                 title: 'No Downloadable Media Found',
-                detail: "We couldn't find downloadable media for this post."
+                detail: "We couldn't extract downloadable media metadata for this post."
               };
-            case 'MALFORMED_RESPONSE':
-            case 'INCOMPLETE_RESPONSE':
+            case 'EXPIRED_MEDIA_URL':
+            case 'MEDIA_URL_EXPIRED':
               return {
-                title: 'Incomplete Response',
-                detail: 'We received an incomplete response. Please try again.'
+                title: 'Media URL Expired',
+                detail: 'The temporary signed download link has expired. Please retry to refresh the URL.'
               };
-            case 'NETWORK_ERROR':
+            case 'PAGE_FETCH_FAILED':
+            case 'CDN_REQUEST_FAILED':
               return {
-                title: 'Connection Interrupted',
-                detail: err.message?.includes('refused')
-                  ? err.message
-                  : 'Connection interrupted. Please check your connection and retry.'
+                title: 'Upstream Fetch Failed',
+                detail: 'Unable to connect to Instagram or CDN servers. Please verify your network connection.'
               };
+            case 'STREAM_INTERRUPTED':
             case 'DOWNLOAD_INTERRUPTED':
               return {
                 title: 'Download Interrupted',
-                detail: 'The download was interrupted. Please retry.'
+                detail: 'The media stream was interrupted before completion. Please retry.'
               };
             case 'SERVER_UNAVAILABLE':
             case 'SERVICE_UNAVAILABLE':

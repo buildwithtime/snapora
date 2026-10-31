@@ -8,6 +8,7 @@ import fastifyStatic from '@fastify/static';
 import { config } from './config/index.js';
 import { healthRoutes } from './routes/health.js';
 import { resolveRoutes } from './routes/resolve.js';
+import { profileRoutes } from './routes/profile.js';
 import { downloadRoutes } from './routes/download.js';
 import { createErrorResponse, formatRateLimitMessage } from './utils/errors.js';
 import { IMediaProvider } from './providers/types.js';
@@ -16,6 +17,7 @@ export interface BuildServerOptions {
   provider?: IMediaProvider;
   enableRateLimit?: boolean;
   serveStatic?: boolean;
+  corsOrigin?: string[] | boolean;
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
@@ -27,8 +29,11 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
 
   // Security: CORS
   await app.register(cors, {
-    origin: config.corsOrigin,
-    methods: ['GET', 'POST', 'OPTIONS']
+    origin: options.corsOrigin !== undefined ? options.corsOrigin : config.corsOrigin,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept', 'X-Requested-With'],
+    credentials: true,
+    maxAge: 86400
   });
 
   // Security: Rate limiting
@@ -86,6 +91,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   // Register API routes
   await app.register(healthRoutes);
   await app.register(resolveRoutes, { provider: options.provider });
+  await app.register(profileRoutes, { provider: options.provider });
   await app.register(downloadRoutes);
 
   // Serve compiled frontend when dist directory exists (single-service deployment)

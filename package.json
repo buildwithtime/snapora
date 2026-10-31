@@ -1,14 +1,22 @@
 {
   "name": "snapora",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Snapora — Modern, secure, open-source multi-URL media downloader queue",
+  "description": "Snapora — An open-source Instagram media downloader with profile discovery, selective downloads, multi-link processing, and ZIP export.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/buildwithtime/snapora.git"
+  },
+  "homepage": "https://snapora-1r3i.onrender.com/",
+  "bugs": {
+    "url": "https://github.com/buildwithtime/snapora/issues"
+  },
   "workspaces": [
     "frontend",
     "backend"
   ],
   "engines": {
-    "node": ">=20.0.0",
+    "node": ">=22.0.0",
     "npm": ">=10.0.0"
   },
   "scripts": {
@@ -23,10 +31,14 @@
   },
   "keywords": [
     "snapora",
+    "instagram-downloader",
     "media-downloader",
+    "instagram",
     "react",
     "fastify",
     "typescript",
+    "vite",
+    "zip-download",
     "open-source"
   ],
   "author": "Snapora Contributors",

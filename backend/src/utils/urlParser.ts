@@ -1,4 +1,4 @@
-export type InstagramContentType = 'post' | 'reel' | 'tv' | 'direct_media';
+export type InstagramContentType = 'post' | 'reel' | 'tv' | 'profile' | 'direct_media';
 
 export interface DirectMediaInfo {
   hostname: string;
@@ -13,6 +13,7 @@ export interface ParsedInstagramUrl {
   canonicalUrl?: string;
   contentType?: InstagramContentType;
   shortcode?: string;
+  username?: string;
   directMediaInfo?: DirectMediaInfo;
   error?: string;
 }
@@ -27,6 +28,37 @@ export const EXACT_ALLOWED_WEB_HOSTS = new Set([
 
 // Valid shortcode regex: Base64URL-style characters between 3 and 40 chars
 export const SHORTCODE_REGEX = /^[a-zA-Z0-9_-]{3,40}$/;
+
+// Instagram username regex: 1-30 chars, alphanumeric + periods + underscores, no leading/trailing dot, no consecutive dots
+export const USERNAME_REGEX = /^(?!.*\.\.)(?!^\.)(?!.*\.$)[a-zA-Z0-9._]{1,30}$/;
+
+// Reserved top-level Instagram paths that must never be treated as profile usernames
+export const RESERVED_INSTAGRAM_PATHS = new Set([
+  'p',
+  'reel',
+  'reels',
+  'tv',
+  'stories',
+  'explore',
+  'accounts',
+  'direct',
+  'create',
+  'about',
+  'legal',
+  'privacy',
+  'terms',
+  'help',
+  'developer',
+  'api',
+  'graphql',
+  'directory',
+  'download',
+  'settings',
+  'your_activity',
+  'saved',
+  'archive',
+  'emails'
+]);
 
 // Known tracking parameters to strip from web permalinks
 const TRACKING_PARAMS = new Set([
@@ -49,16 +81,17 @@ const TRACKING_PARAMS = new Set([
  */
 export function isInstagramCdnHostname(hostname: string): boolean {
   const lower = hostname.toLowerCase().replace(/\.+$/, '');
-  // Matches scontent*.cdninstagram.com or instagram.*.fbcdn.net
+  // Matches *.cdninstagram.com (photos, videos, reels, thumbnails) or *.fbcdn.net
   return (
-    /^scontent[a-zA-Z0-9.-]*\.cdninstagram\.com$/.test(lower) ||
-    /^[a-zA-Z0-9.-]*\.fbcdn\.net$/.test(lower)
+    /^[a-zA-Z0-9.-]+\.cdninstagram\.com$/.test(lower) ||
+    /^[a-zA-Z0-9.-]+\.fbcdn\.net$/.test(lower)
   );
 }
 
 interface PathMatch {
   shortcode: string;
   contentType: InstagramContentType;
+  username?: string;
 }
 
 function matchInstagramWebPath(pathname: string): PathMatch | null {
@@ -83,14 +116,23 @@ function matchInstagramWebPath(pathname: string): PathMatch | null {
   }
 
   // 4. User-prefixed Post or Reel: /{username}/p/{shortcode} or /{username}/reel/{shortcode}
-  const userPostMatch = cleanPath.match(/^\/[a-zA-Z0-9_.]+\/p\/([a-zA-Z0-9_-]+)$/);
+  const userPostMatch = cleanPath.match(/^\/([a-zA-Z0-9_.]+)\/p\/([a-zA-Z0-9_-]+)$/);
   if (userPostMatch) {
-    return { shortcode: userPostMatch[1], contentType: 'post' };
+    return { shortcode: userPostMatch[2], username: userPostMatch[1], contentType: 'post' };
   }
 
-  const userReelMatch = cleanPath.match(/^\/[a-zA-Z0-9_.]+\/reels?\/([a-zA-Z0-9_-]+)$/);
+  const userReelMatch = cleanPath.match(/^\/([a-zA-Z0-9_.]+)\/reels?\/([a-zA-Z0-9_-]+)$/);
   if (userReelMatch) {
-    return { shortcode: userReelMatch[1], contentType: 'reel' };
+    return { shortcode: userReelMatch[2], username: userReelMatch[1], contentType: 'reel' };
+  }
+
+  // 5. User Profile: /{username}
+  const profileMatch = cleanPath.match(/^\/([a-zA-Z0-9_.]+)$/);
+  if (profileMatch) {
+    const candidate = profileMatch[1];
+    if (!RESERVED_INSTAGRAM_PATHS.has(candidate.toLowerCase()) && USERNAME_REGEX.test(candidate)) {
+      return { shortcode: candidate, username: candidate, contentType: 'profile' };
+    }
   }
 
   return null;
@@ -98,7 +140,7 @@ function matchInstagramWebPath(pathname: string): PathMatch | null {
 
 /**
  * Robust URL parser and canonicalizer for Instagram media links.
- * Supports standard web posts, Reels, IGTV, and verified Meta CDN media URLs.
+ * Supports standard web posts, Reels, IGTV, verified Meta CDN media URLs, and user profiles.
  */
 export function parseInstagramUrl(rawUrl: string): ParsedInstagramUrl {
   if (!rawUrl || typeof rawUrl !== 'string') {
@@ -108,6 +150,15 @@ export function parseInstagramUrl(rawUrl: string): ParsedInstagramUrl {
   const trimmed = rawUrl.trim();
   if (!trimmed) {
     return { valid: false, originalUrl: rawUrl, error: 'URL cannot be empty or blank' };
+  }
+
+  // Reject path traversal sequences
+  if (trimmed.includes('/../') || trimmed.includes('/..') || trimmed.includes('\\')) {
+    return {
+      valid: false,
+      originalUrl: rawUrl,
+      error: 'Path traversal sequences are not permitted'
+    };
   }
 
   let parsed: URL;
@@ -180,7 +231,7 @@ export function parseInstagramUrl(rawUrl: string): ParsedInstagramUrl {
     };
   }
 
-  // 5. Case B: Official Instagram Web Permalinks
+  // 5. Case B: Official Instagram Web Permalinks & Profiles
   if (!EXACT_ALLOWED_WEB_HOSTS.has(hostname)) {
     return {
       valid: false,
@@ -194,7 +245,19 @@ export function parseInstagramUrl(rawUrl: string): ParsedInstagramUrl {
     return {
       valid: false,
       originalUrl: rawUrl,
-      error: 'Unrecognized Instagram path (expected /p/, /reel/, /reels/, or /tv/)'
+      error: 'Unrecognized Instagram path (expected /p/, /reel/, /reels/, /tv/, or valid profile /<username>/)'
+    };
+  }
+
+  if (match.contentType === 'profile') {
+    const canonicalUrl = `https://www.instagram.com/${match.username}/`;
+    return {
+      valid: true,
+      originalUrl: rawUrl,
+      canonicalUrl,
+      contentType: 'profile',
+      username: match.username,
+      shortcode: match.username
     };
   }
 
@@ -215,6 +278,7 @@ export function parseInstagramUrl(rawUrl: string): ParsedInstagramUrl {
     originalUrl: rawUrl,
     canonicalUrl,
     contentType: match.contentType,
-    shortcode: match.shortcode
+    shortcode: match.shortcode,
+    username: match.username
   };
 }

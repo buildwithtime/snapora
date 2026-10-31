@@ -1,4 +1,12 @@
-import { IMediaProvider, ResolveResult, ProviderCapabilities } from './types.js';
+import {
+  IMediaProvider,
+  ResolveResult,
+  ProviderCapabilities,
+  ProfileDiscoveryResult,
+  ProfileDiscoveryOptions,
+  ProfileMediaItem
+} from './types.js';
+import { parseInstagramUrl } from '../utils/urlParser.js';
 
 export class MockProvider implements IMediaProvider {
   readonly id = 'mock';
@@ -11,7 +19,8 @@ export class MockProvider implements IMediaProvider {
       supportsOriginalDownload: true,
       supportsCarousel: true,
       requiresAuthentication: false,
-      requiresConfiguration: false
+      requiresConfiguration: false,
+      supportsProfileDiscovery: true
     };
   }
 
@@ -212,6 +221,171 @@ export class MockProvider implements IMediaProvider {
         providerName: 'Instagram'
       },
       media: [singleMedia]
+    };
+  }
+
+  canDiscoverProfile(urlOrUsername: string): boolean {
+    if (!urlOrUsername) return false;
+    const trimmed = urlOrUsername.trim();
+    return trimmed.length > 0;
+  }
+
+  async discoverProfile(
+    urlOrUsername: string,
+    options?: ProfileDiscoveryOptions
+  ): Promise<ProfileDiscoveryResult> {
+    await new Promise((resolve) => setTimeout(resolve, 60));
+
+    let cleanUsername = urlOrUsername.trim();
+    if (cleanUsername.includes('/') || cleanUsername.includes('.')) {
+      const parsed = parseInstagramUrl(cleanUsername);
+      if (parsed.valid && parsed.username) {
+        cleanUsername = parsed.username;
+      } else {
+        const parts = cleanUsername.split('/').filter(Boolean);
+        cleanUsername = parts.pop() || cleanUsername;
+      }
+    }
+    cleanUsername = cleanUsername.replace(/^@/, '');
+
+    const lower = cleanUsername.toLowerCase();
+
+    if (lower.includes('private')) {
+      return {
+        ok: false,
+        provider: this.name,
+        error: {
+          code: 'PRIVATE_ACCOUNT',
+          message: 'This Instagram account is private. Media is only visible to approved followers.'
+        }
+      };
+    }
+
+    if (lower.includes('ratelimit') || lower.includes('429')) {
+      return {
+        ok: false,
+        provider: this.name,
+        error: {
+          code: 'RATE_LIMITED',
+          message: 'Instagram is temporarily limiting requests. Please try again in 60 seconds.',
+          retryAfterSeconds: 60
+        }
+      };
+    }
+
+    if (lower.includes('notfound') || lower.includes('404')) {
+      return {
+        ok: false,
+        provider: this.name,
+        error: {
+          code: 'POST_NOT_FOUND',
+          message: `Instagram profile '@${cleanUsername}' could not be found. Check the handle and try again.`
+        }
+      };
+    }
+
+    if (lower.includes('empty')) {
+      return {
+        ok: true,
+        provider: this.name,
+        profile: {
+          username: cleanUsername,
+          fullName: 'Empty Profile Fixture',
+          biography: 'No media posts published yet.',
+          avatarUrl: `https://picsum.photos/seed/${cleanUsername}_avatar/300/300`,
+          isPrivate: false,
+          isVerified: false,
+          postsCount: 0,
+          followersCount: 15,
+          followingCount: 30
+        },
+        items: [],
+        pagination: {
+          hasMore: false,
+          totalLoaded: 0
+        }
+      };
+    }
+
+    const isPage2 = options?.cursor === 'cursor_page_2';
+    const startIndex = isPage2 ? 13 : 1;
+    const endIndex = isPage2 ? 24 : 12;
+
+    const items: ProfileMediaItem[] = [];
+    for (let i = startIndex; i <= endIndex; i++) {
+      const type: 'image' | 'video' | 'carousel' =
+        i % 3 === 0 ? 'carousel' : i % 3 === 1 ? 'image' : 'video';
+
+      const shortcode = `MockPost${cleanUsername}${i}`;
+      const item: ProfileMediaItem = {
+        id: `mock_${cleanUsername}_item_${i}`,
+        shortcode,
+        url: `https://www.instagram.com/p/${shortcode}/`,
+        type,
+        thumbnailUrl: `https://picsum.photos/seed/${cleanUsername}_${i}/480/480`,
+        displayUrl: `https://picsum.photos/seed/${cleanUsername}_${i}/1080/1080`,
+        caption: `Visual showcase #${i} by @${cleanUsername}. Capturing geometry, lighting, and textures.`,
+        likesCount: 1250 + i * 85,
+        commentsCount: 42 + i * 4,
+        timestamp: Date.now() - i * 86400000
+      };
+
+      if (type === 'video') {
+        item.videoDurationSeconds = 30 + (i % 60);
+      }
+
+      if (type === 'carousel') {
+        item.carouselMedia = [
+          {
+            id: `mock_${cleanUsername}_item_${i}_slide_1`,
+            type: 'image',
+            url: `https://picsum.photos/seed/${cleanUsername}_${i}_1/1080/1080`,
+            thumbnailUrl: `https://picsum.photos/seed/${cleanUsername}_${i}_1/320/320`,
+            width: 1080,
+            height: 1080
+          },
+          {
+            id: `mock_${cleanUsername}_item_${i}_slide_2`,
+            type: 'image',
+            url: `https://picsum.photos/seed/${cleanUsername}_${i}_2/1080/1080`,
+            thumbnailUrl: `https://picsum.photos/seed/${cleanUsername}_${i}_2/320/320`,
+            width: 1080,
+            height: 1080
+          },
+          {
+            id: `mock_${cleanUsername}_item_${i}_slide_3`,
+            type: 'image',
+            url: `https://picsum.photos/seed/${cleanUsername}_${i}_3/1080/1080`,
+            thumbnailUrl: `https://picsum.photos/seed/${cleanUsername}_${i}_3/320/320`,
+            width: 1080,
+            height: 1080
+          }
+        ];
+      }
+
+      items.push(item);
+    }
+
+    return {
+      ok: true,
+      provider: this.name,
+      profile: {
+        username: cleanUsername,
+        fullName: `${cleanUsername.charAt(0).toUpperCase() + cleanUsername.slice(1)} Studio`,
+        biography: `Design, photography & visual storytelling. Curated gallery demo for Snapora v0.3.0.`,
+        avatarUrl: `https://picsum.photos/seed/${cleanUsername}_avatar/300/300`,
+        isPrivate: false,
+        isVerified: true,
+        postsCount: 24,
+        followersCount: 184500,
+        followingCount: 520
+      },
+      items,
+      pagination: {
+        hasMore: !isPage2,
+        nextCursor: isPage2 ? undefined : 'cursor_page_2',
+        totalLoaded: isPage2 ? 24 : 12
+      }
     };
   }
 }

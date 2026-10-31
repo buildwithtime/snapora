@@ -22,6 +22,7 @@ describe('AuthorizedAccountMediaProvider Suite', () => {
     expect(caps.supportsCarousel).toBe(true);
     expect(caps.requiresAuthentication).toBe(true);
     expect(caps.requiresConfiguration).toBe(true);
+    expect(caps.supportsProfileDiscovery).toBe(true);
   });
 
   it('resolves authenticated media and carousel album when valid token and data are supplied', async () => {
@@ -92,6 +93,168 @@ describe('AuthorizedAccountMediaProvider Suite', () => {
     if (!result.ok) {
       expect(result.status).toBe('authentication_required');
       expect(result.error.code).toBe('AUTHENTICATION_ERROR');
+    }
+  });
+
+  it('discovers profile media when authorized token is supplied', async () => {
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/me?')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({
+            id: '12345',
+            username: 'auth_creator',
+            name: 'Authorized Creator',
+            media_count: 5
+          })
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          data: [
+            {
+              id: 'post_1',
+              media_type: 'IMAGE',
+              media_url: 'https://cdn.example.com/photo.jpg',
+              permalink: 'https://www.instagram.com/p/Code1/',
+              caption: 'Hello World'
+            }
+          ],
+          paging: { cursors: { after: 'next_cursor' } }
+        })
+      });
+    });
+
+    const provider = new AuthorizedAccountMediaProvider({
+      userAccessToken: 'valid_token',
+      fetchFn: mockFetch as any
+    });
+
+    const res = await provider.discoverProfile('auth_creator');
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.profile.username).toBe('auth_creator');
+      expect(res.items).toHaveLength(1);
+      expect(res.items[0].shortcode).toBe('Code1');
+    }
+
+    // Verify Bearer header was sent
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining('https://graph.facebook.com/'),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer valid_token'
+        })
+      })
+    );
+  });
+
+  it('rejects profile discovery when requested user does not match authorized token owner', async () => {
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: '12345',
+          username: 'my_creator_account',
+          name: 'My Creator Account'
+        })
+      });
+    });
+
+    const provider = new AuthorizedAccountMediaProvider({
+      userAccessToken: 'valid_token',
+      fetchFn: mockFetch as any
+    });
+
+    const res = await provider.discoverProfile('arbitrary_other_user');
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('AUTHENTICATION_REQUIRED');
+      expect(res.error.message).toContain('only provides authorized access to your own managed creator or business account');
+    }
+  });
+
+  it('rejects malformed pagination cursor with invalid characters', async () => {
+    const provider = new AuthorizedAccountMediaProvider({
+      userAccessToken: 'valid_token'
+    });
+
+    const res = await provider.discoverProfile('auth_creator', {
+      cursor: 'https://attacker.com/evil'
+    });
+
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('INVALID_REQUEST');
+      expect(res.error.message).toContain('Malformed pagination cursor');
+    }
+  });
+
+  it('accepts valid Meta Graph API Base64 cursor with padding and constructs proper after parameter', async () => {
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/me?')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ id: '12345', username: 'auth_creator' })
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [] })
+      });
+    });
+
+    const provider = new AuthorizedAccountMediaProvider({
+      userAccessToken: 'valid_token',
+      fetchFn: mockFetch as any
+    });
+
+    const validMetaCursor = 'QVFIUk9xTXpFeU16RTFPRFkzTmpFM09EZ3lNREU9PQ==';
+    const res = await provider.discoverProfile('auth_creator', {
+      cursor: validMetaCursor
+    });
+
+    expect(res.ok).toBe(true);
+    // Check that destination host remained graph.facebook.com and cursor was passed in searchParams
+    const mediaCall = mockFetch.mock.calls.find((c: any[]) => c[0].includes('/me/media'));
+    expect(mediaCall).toBeDefined();
+    expect(mediaCall[0]).toContain('https://graph.facebook.com/');
+    expect(mediaCall[0]).toContain(encodeURIComponent(validMetaCursor));
+  });
+
+  it('returns AUTHENTICATION_ERROR when Meta Graph API returns OAuthException code 190', async () => {
+    const mockFetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/me?')) {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: async () => ({ id: '12345', username: 'auth_creator' })
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 400,
+        json: async () => ({
+          error: { message: 'Error validating access token: Session expired', code: 190, type: 'OAuthException' }
+        })
+      });
+    });
+
+    const provider = new AuthorizedAccountMediaProvider({
+      userAccessToken: 'valid_token',
+      fetchFn: mockFetch as any
+    });
+
+    const res = await provider.discoverProfile('auth_creator');
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('AUTHENTICATION_ERROR');
     }
   });
 });

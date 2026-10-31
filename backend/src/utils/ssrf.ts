@@ -2,12 +2,13 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import { parseInstagramUrl, ParsedInstagramUrl, isInstagramCdnHostname, EXACT_ALLOWED_WEB_HOSTS } from './urlParser.js';
 
-export type InstagramMediaType = 'post' | 'reel' | 'tv' | 'direct_media';
+export type InstagramMediaType = 'post' | 'reel' | 'tv' | 'profile' | 'direct_media';
 
 export interface ValidationResult {
   valid: boolean;
   normalizedUrl?: string;
   shortcode?: string;
+  username?: string;
   mediaType?: InstagramMediaType;
   error?: string;
 }
@@ -203,6 +204,7 @@ export function validateAndSanitizeUrl(rawUrl: string): ValidationResult {
     valid: true,
     normalizedUrl: res.canonicalUrl,
     shortcode: res.shortcode || 'direct_media',
+    username: res.username,
     mediaType: res.contentType
   };
 }

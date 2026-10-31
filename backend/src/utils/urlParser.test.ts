@@ -51,8 +51,44 @@ describe('Backend Instagram URL Parser', () => {
   it('recognizes CDN host patterns correctly', () => {
     expect(isInstagramCdnHostname('scontent-iad3-1.cdninstagram.com')).toBe(true);
     expect(isInstagramCdnHostname('scontent.cdninstagram.com')).toBe(true);
+    expect(isInstagramCdnHostname('video-iad3-1.cdninstagram.com')).toBe(true);
+    expect(isInstagramCdnHostname('video.cdninstagram.com')).toBe(true);
     expect(isInstagramCdnHostname('instagram.fdel1-1.fna.fbcdn.net')).toBe(true);
     expect(isInstagramCdnHostname('evil-cdninstagram.com')).toBe(false);
     expect(isInstagramCdnHostname('cdninstagram.com.attacker.com')).toBe(false);
+  });
+
+  it('correctly identifies and canonicalizes Instagram profile URLs', () => {
+    const p1 = parseInstagramUrl('https://www.instagram.com/natgeo/');
+    expect(p1.valid).toBe(true);
+    expect(p1.contentType).toBe('profile');
+    expect(p1.username).toBe('natgeo');
+    expect(p1.canonicalUrl).toBe('https://www.instagram.com/natgeo/');
+
+    const p2 = parseInstagramUrl('https://instagram.com/travel_blogger.99');
+    expect(p2.valid).toBe(true);
+    expect(p2.contentType).toBe('profile');
+    expect(p2.username).toBe('travel_blogger.99');
+    expect(p2.canonicalUrl).toBe('https://www.instagram.com/travel_blogger.99/');
+
+    const p3 = parseInstagramUrl('https://m.instagram.com/artist/');
+    expect(p3.valid).toBe(true);
+    expect(p3.contentType).toBe('profile');
+    expect(p3.username).toBe('artist');
+    expect(p3.canonicalUrl).toBe('https://www.instagram.com/artist/');
+  });
+
+  it('rejects reserved top-level paths from being parsed as profiles', () => {
+    const reserved = ['explore', 'accounts', 'stories', 'direct', 'create', 'settings', 'legal'];
+    for (const r of reserved) {
+      const res = parseInstagramUrl(`https://www.instagram.com/${r}/`);
+      expect(res.valid).toBe(false);
+    }
+  });
+
+  it('rejects malformed usernames with leading/trailing dots or consecutive dots', () => {
+    expect(parseInstagramUrl('https://www.instagram.com/.invalidname/').valid).toBe(false);
+    expect(parseInstagramUrl('https://www.instagram.com/invalidname./').valid).toBe(false);
+    expect(parseInstagramUrl('https://www.instagram.com/invalid..name/').valid).toBe(false);
   });
 });

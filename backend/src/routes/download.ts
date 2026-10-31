@@ -81,20 +81,32 @@ export async function downloadRoutes(app: FastifyInstance) {
         );
       }
 
+      let safeResponse: SafeRequestResponse | undefined;
       const clientAbortController = new AbortController();
       request.raw.on('close', () => {
         if (!reply.raw.writableEnded) {
           clientAbortController.abort();
+          if (safeResponse?.stream && !safeResponse.stream.destroyed) {
+            safeResponse.stream.destroy();
+          }
         }
       });
 
       // Execute connection-pinned safe HTTPS request (immune to DNS rebinding & redirect hijacking)
-      let safeResponse: SafeRequestResponse;
       try {
         safeResponse = await safeHttpsRequest(url, {
           method: 'GET',
-          timeoutMs: config.resolverTimeoutMs || 30000,
-          maxResponseSizeBytes: config.maxResponseSizeBytes || 52428800,
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Sec-Fetch-Dest': expectedType === 'video' ? 'video' : 'image',
+            'Sec-Fetch-Mode': 'no-cors',
+            'Sec-Fetch-Site': 'cross-site'
+          },
+          timeoutMs: config.resolverTimeoutMs ? Math.max(config.resolverTimeoutMs, 30000) : 30000,
+          maxResponseSizeBytes: config.maxResponseSizeBytes || 157286400,
           signal: clientAbortController.signal
         });
       } catch (err: any) {
@@ -124,6 +136,20 @@ export async function downloadRoutes(app: FastifyInstance) {
         );
       }
 
+      if (safeResponse.statusCode === 403 || safeResponse.statusCode === 410) {
+        safeResponse.stream.destroy();
+        return reply.status(403).send(
+          createErrorResponse('EXPIRED_MEDIA_URL', 'The upstream media URL has expired or is forbidden. Please refresh media links.')
+        );
+      }
+
+      if (safeResponse.statusCode === 404) {
+        safeResponse.stream.destroy();
+        return reply.status(404).send(
+          createErrorResponse('POST_NOT_FOUND', 'The requested media file was not found on the upstream CDN.')
+        );
+      }
+
       if (safeResponse.statusCode >= 400) {
         safeResponse.stream.destroy();
         return reply.status(502).send(
@@ -143,19 +169,25 @@ export async function downloadRoutes(app: FastifyInstance) {
         }
       }
 
-      // Inspect initial chunk for magic bytes validation
+      // Inspect initial chunks for magic bytes validation
       const stream = safeResponse.stream;
-      let firstChunk: Buffer | null = null;
+      const initialChunks: Buffer[] = [];
+      let initialBytes = 0;
 
       try {
-        firstChunk = await new Promise<Buffer | null>((resolve, reject) => {
+        await new Promise<void>((resolve, reject) => {
           const onData = (chunk: Buffer) => {
-            cleanup();
-            resolve(chunk);
+            initialChunks.push(chunk);
+            initialBytes += chunk.length;
+            if (initialBytes >= 64 || stream.readableEnded) {
+              stream.pause();
+              cleanup();
+              resolve();
+            }
           };
           const onEnd = () => {
             cleanup();
-            resolve(null);
+            resolve();
           };
           const onError = (err: Error) => {
             cleanup();
@@ -177,14 +209,16 @@ export async function downloadRoutes(app: FastifyInstance) {
         return reply.status(502).send(createErrorResponse('NETWORK_ERROR', 'Failed to read media header chunk'));
       }
 
-      if (!firstChunk || firstChunk.length < 12) {
+      const headerBuffer = Buffer.concat(initialChunks);
+
+      if (headerBuffer.length < 12) {
         stream.destroy();
         return reply.status(422).send(
           createErrorResponse('MEDIA_VALIDATION_FAILED', 'Media response is empty or truncated')
         );
       }
 
-      const magicCheck = validateMediaBytes(firstChunk);
+      const magicCheck = validateMediaBytes(headerBuffer);
       if (!magicCheck.valid) {
         stream.destroy();
         return reply.status(422).send(
@@ -228,16 +262,19 @@ export async function downloadRoutes(app: FastifyInstance) {
       }
 
       reply.raw.writeHead(200);
-      reply.raw.write(firstChunk);
 
-      let totalBytes = firstChunk.length;
+      for (const chunk of initialChunks) {
+        reply.raw.write(chunk);
+      }
+
+      let totalBytes = initialBytes;
 
       if (stream.readableEnded) {
         reply.raw.end();
       } else {
         stream.on('data', (chunk: Buffer) => {
           totalBytes += chunk.length;
-          if (totalBytes > config.maxResponseSizeBytes) {
+          if (totalBytes > (config.maxResponseSizeBytes || 157286400)) {
             stream.destroy(new Error('File size exceeded limit'));
             reply.raw.destroy(new Error('File size exceeded limit'));
             return;
@@ -248,6 +285,14 @@ export async function downloadRoutes(app: FastifyInstance) {
         stream.on('end', () => {
           reply.raw.end();
         });
+
+        stream.on('error', () => {
+          if (!reply.raw.writableEnded) {
+            reply.raw.destroy();
+          }
+        });
+
+        stream.resume();
       }
 
       stream.on('error', () => {

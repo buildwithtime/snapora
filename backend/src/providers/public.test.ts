@@ -19,6 +19,14 @@ describe('PublicWebMediaProvider Suite', () => {
     expect(caps.supportsCarousel).toBe(true);
     expect(caps.requiresAuthentication).toBe(false);
     expect(caps.requiresConfiguration).toBe(false);
+    expect(caps.supportsProfileDiscovery).toBe(true);
+  });
+
+  it('identifies eligible profile URLs and handles', () => {
+    expect(provider.canDiscoverProfile('https://www.instagram.com/natgeo/')).toBe(true);
+    expect(provider.canDiscoverProfile('natgeo')).toBe(true);
+    expect(provider.canDiscoverProfile('@natgeo')).toBe(true);
+    expect(provider.canDiscoverProfile('invalid..user')).toBe(false);
   });
 
   it('identifies eligible Instagram post and reel URLs', () => {
@@ -303,6 +311,52 @@ describe('PublicWebMediaProvider Suite', () => {
     expect(res.ok).toBe(false);
     if (!res.ok) {
       expect(res.error.code).toBe('CONTENT_PRIVATE');
+    }
+  });
+
+  it('classifies unauthenticated SPA client shells as LOGIN_WALL_ENCOUNTERED', async () => {
+    vi.spyOn(ssrfClient, 'safeHttpsRequest').mockResolvedValue({
+      statusCode: 200,
+      headers: { 'content-type': 'text/html' },
+      stream: Readable.from(['<html><head><title>Instagram</title></head><body><script>{"require":[["PolarisLogin"]]}</script></body></html>']) as any,
+      finalUrl: 'https://www.instagram.com/reel/C8q84p7SOlM/'
+    });
+
+    const res = await provider.resolve('https://www.instagram.com/reel/C8q84p7SOlM/', 'C8q84p7SOlM');
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('LOGIN_WALL_ENCOUNTERED');
+      expect(res.status).toBe('authentication_required');
+      expect(res.error.message).toContain('Instagram served an unauthenticated web shell');
+    }
+  });
+
+  it('classifies missing metadata on rendered HTML as METADATA_NOT_FOUND', async () => {
+    vi.spyOn(ssrfClient, 'safeHttpsRequest').mockResolvedValue({
+      statusCode: 200,
+      headers: { 'content-type': 'text/html' },
+      stream: Readable.from(['<html><head><title>Some User on Instagram</title></head><body>No scripts here</body></html>']) as any,
+      finalUrl: 'https://www.instagram.com/p/valid_page_no_media/'
+    });
+
+    const res = await provider.resolve('https://www.instagram.com/p/valid_page_no_media/', 'valid_page_no_media');
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('METADATA_NOT_FOUND');
+      expect(res.status).toBe('unsupported_content');
+    }
+  });
+
+  it('classifies DNS or network connectivity failure as PAGE_FETCH_FAILED', async () => {
+    vi.spyOn(ssrfClient, 'safeHttpsRequest').mockRejectedValue(
+      new Error('getaddrinfo ENOTFOUND www.instagram.com')
+    );
+
+    const res = await provider.resolve('https://www.instagram.com/p/dns_failure/', 'dns_failure');
+    expect(res.ok).toBe(false);
+    if (!res.ok) {
+      expect(res.error.code).toBe('PAGE_FETCH_FAILED');
+      expect(res.status).toBe('provider_error');
     }
   });
 });

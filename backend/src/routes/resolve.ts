@@ -58,10 +58,14 @@ export async function resolveRoutes(app: FastifyInstance, options?: { provider?:
               ? 401
               : result.error.code === 'CONTENT_PRIVATE' || result.error.code === 'PRIVATE_ACCOUNT' || result.error.code === 'HTTP_403_FORBIDDEN' || result.error.code === 'LOGIN_WALL_ENCOUNTERED'
               ? 403
-              : result.error.code === 'CONTENT_UNAVAILABLE' || result.error.code === 'POST_NOT_FOUND'
+              : result.error.code === 'CONTENT_UNAVAILABLE' || result.error.code === 'POST_NOT_FOUND' || result.error.code === 'METADATA_NOT_FOUND'
               ? 404
+              : result.error.code === 'EXPIRED_MEDIA_URL' || result.error.code === 'MEDIA_URL_EXPIRED'
+              ? 410
               : result.error.code === 'RATE_LIMITED' || result.error.code === 'HTTP_429_RATE_LIMITED'
               ? 429
+              : result.error.code === 'PAGE_FETCH_FAILED' || result.error.code === 'CDN_REQUEST_FAILED' || result.error.code === 'STREAM_INTERRUPTED'
+              ? 502
               : result.error.code === 'PROVIDER_NOT_CONFIGURED' || result.error.code === 'CONFIGURATION_REQUIRED'
               ? 503
               : result.error.code === 'SSRF_BLOCKED' || result.error.code === 'UNSUPPORTED_URL' || result.error.code === 'INVALID_URL'

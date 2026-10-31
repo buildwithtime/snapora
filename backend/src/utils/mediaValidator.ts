@@ -41,15 +41,40 @@ export function validateMediaBytes(headerChunk: Uint8Array | Buffer): MediaValid
     };
   }
 
-  // 3. Check MP4 (ISO Base Media File Format):
-  // Offset 4..7 must be 'ftyp' (0x66 0x74 0x79 0x70)
-  if (
-    bytes[4] === 0x66 &&
-    bytes[5] === 0x74 &&
-    bytes[6] === 0x79 &&
-    bytes[7] === 0x70
-  ) {
-    const brand = bytes.subarray(8, 12).toString('ascii');
+  // 3. Check MP4 (ISO Base Media File Format / QuickTime / WebM):
+  // Box header: [4-byte big-endian length][4-byte ASCII type]
+  let isIsoBmffVideo = false;
+
+  if (bytes.length >= 8) {
+    const box1Type = bytes.subarray(4, 8).toString('latin1');
+    const box1Size = bytes.readUInt32BE(0);
+
+    // Direct 'ftyp' box at offset 0..7
+    if (box1Type === 'ftyp' && (box1Size >= 8 || box1Size === 0 || box1Size === 1)) {
+      isIsoBmffVideo = true;
+    }
+    // Box preceded by 'wide' or 'free' atom (common in camera-captured MP4s)
+    else if ((box1Type === 'wide' || box1Type === 'free') && box1Size >= 8 && box1Size + 8 <= bytes.length) {
+      const box2Type = bytes.subarray(box1Size + 4, box1Size + 8).toString('latin1');
+      if (box2Type === 'ftyp') {
+        isIsoBmffVideo = true;
+      }
+    }
+    // QuickTime movie/mdat atom: size + 'moov' or 'mdat'
+    else if ((box1Type === 'moov' || box1Type === 'mdat') && box1Size >= 8) {
+      isIsoBmffVideo = true;
+    }
+  }
+
+  // WebM / Matroska: EBML header 0x1A 0x45 0xDF 0xA3 strictly at offset 0
+  const isWebm =
+    bytes.length >= 4 &&
+    bytes[0] === 0x1a &&
+    bytes[1] === 0x45 &&
+    bytes[2] === 0xdf &&
+    bytes[3] === 0xa3;
+
+  if (isIsoBmffVideo || isWebm) {
     return {
       valid: true,
       detectedType: 'video/mp4'

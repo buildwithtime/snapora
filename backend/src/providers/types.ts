@@ -102,6 +102,75 @@ export interface ResolveFailure {
 
 export type ResolveResult = ResolveSuccess | ResolveFailure;
 
+export interface ProfileInfo {
+  username: string;
+  fullName?: string;
+  biography?: string;
+  avatarUrl?: string;
+  isPrivate: boolean;
+  isVerified?: boolean;
+  postsCount?: number;
+  followersCount?: number;
+  followingCount?: number;
+}
+
+export interface ProfileMediaChild {
+  id: string;
+  type: 'image' | 'video';
+  url: string;
+  thumbnailUrl?: string;
+  width?: number;
+  height?: number;
+}
+
+export interface ProfileMediaItem {
+  id: string;
+  shortcode: string;
+  url: string;
+  type: 'image' | 'video' | 'carousel';
+  thumbnailUrl: string;
+  displayUrl: string;
+  caption?: string;
+  likesCount?: number;
+  commentsCount?: number;
+  timestamp?: number | string;
+  videoDurationSeconds?: number;
+  carouselMedia?: ProfileMediaChild[];
+}
+
+export interface ProfilePagination {
+  hasMore: boolean;
+  nextCursor?: string;
+  totalLoaded?: number;
+}
+
+export interface ProfileDiscoverySuccess {
+  ok: true;
+  provider: string;
+  profile: ProfileInfo;
+  items: ProfileMediaItem[];
+  pagination: ProfilePagination;
+}
+
+export interface ProfileDiscoveryFailure {
+  ok: false;
+  provider: string;
+  error: {
+    code: ErrorCode;
+    message: string;
+    details?: string;
+    retryAfterSeconds?: number;
+  };
+}
+
+export type ProfileDiscoveryResult = ProfileDiscoverySuccess | ProfileDiscoveryFailure;
+
+export interface ProfileDiscoveryOptions {
+  cursor?: string;
+  userAccessToken?: string;
+  limit?: number;
+}
+
 export interface ProviderCapabilities {
   supportsPreview: boolean;
   supportsMetadata: boolean;
@@ -109,6 +178,7 @@ export interface ProviderCapabilities {
   supportsCarousel: boolean;
   requiresAuthentication: boolean;
   requiresConfiguration: boolean;
+  supportsProfileDiscovery?: boolean;
 }
 
 export interface ResolveOptions {
@@ -121,4 +191,6 @@ export interface IMediaProvider {
   getCapabilities(): ProviderCapabilities;
   canResolve(url: string): boolean;
   resolve(url: string, shortcode: string, options?: ResolveOptions): Promise<ResolveResult>;
+  canDiscoverProfile?(urlOrUsername: string): boolean;
+  discoverProfile?(urlOrUsername: string, options?: ProfileDiscoveryOptions): Promise<ProfileDiscoveryResult>;
 }

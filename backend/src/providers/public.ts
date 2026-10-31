@@ -1,5 +1,17 @@
-import { IMediaProvider, ProviderCapabilities, ResolveResult, MediaItem, CarouselItem, ResolveOptions } from './types.js';
-import { parseInstagramUrl } from '../utils/urlParser.js';
+import {
+  IMediaProvider,
+  ProviderCapabilities,
+  ResolveResult,
+  MediaItem,
+  CarouselItem,
+  ResolveOptions,
+  ProfileDiscoveryResult,
+  ProfileDiscoveryOptions,
+  ProfileInfo,
+  ProfileMediaItem,
+  ProfileMediaChild
+} from './types.js';
+import { parseInstagramUrl, USERNAME_REGEX } from '../utils/urlParser.js';
 import { safeHttpsRequest } from '../utils/ssrfClient.js';
 import { config } from '../config/index.js';
 import { parseRetryAfter, formatRateLimitMessage } from '../utils/errors.js';
@@ -25,7 +37,8 @@ export class PublicWebMediaProvider implements IMediaProvider {
       supportsOriginalDownload: true,
       supportsCarousel: true,
       requiresAuthentication: false,
-      requiresConfiguration: false
+      requiresConfiguration: false,
+      supportsProfileDiscovery: true
     };
   }
 
@@ -136,8 +149,12 @@ export class PublicWebMediaProvider implements IMediaProvider {
       }
       const html = Buffer.concat(chunks).toString('utf8');
 
-      // Check if redirected to login page indicating private post
-      if (safeResponse.finalUrl.includes('/accounts/login/') || html.includes('login_page') && !html.includes('xig_polaris_media')) {
+      // Check if redirected to login page indicating private post or login wall
+      const isLoginRedirect =
+        safeResponse.finalUrl.includes('/accounts/login') ||
+        (html.includes('login_page') && !html.includes('xig_polaris_media'));
+
+      if (isLoginRedirect) {
         return {
           ok: false,
           status: 'authentication_required',
@@ -146,6 +163,25 @@ export class PublicWebMediaProvider implements IMediaProvider {
           error: {
             code: 'CONTENT_PRIVATE',
             message: 'This post belongs to a private account or requires Instagram login.'
+          }
+        };
+      }
+
+      const isLoginWall =
+        html.includes('/accounts/login/') ||
+        html.includes('Login • Instagram') ||
+        html.includes('"require_login":true') ||
+        html.includes('login-box');
+
+      if (isLoginWall) {
+        return {
+          ok: false,
+          status: 'authentication_required',
+          provider: this.id,
+          shortcode,
+          error: {
+            code: 'LOGIN_WALL_ENCOUNTERED',
+            message: 'Instagram requires account authorization to view this post. Connect an authorized Meta account or provide an access token.'
           }
         };
       }
@@ -180,13 +216,14 @@ export class PublicWebMediaProvider implements IMediaProvider {
       }
 
       const msg = err instanceof Error ? err.message : 'Unknown network failure';
+      const isPageFetchFailed = msg.includes('ENOTFOUND') || msg.includes('ECONNREFUSED') || msg.includes('ECONNRESET');
       return {
         ok: false,
         status: 'provider_error',
         provider: this.id,
         shortcode,
         error: {
-          code: 'NETWORK_ERROR',
+          code: isPageFetchFailed ? 'PAGE_FETCH_FAILED' : 'NETWORK_ERROR',
           message: `Failed to resolve post from Instagram web: ${msg}`
         }
       };
@@ -428,13 +465,32 @@ export class PublicWebMediaProvider implements IMediaProvider {
       };
     }
 
+    const isClientShell =
+      html.includes('Polaris') ||
+      html.includes('requireLazy') ||
+      html.includes('CAAIGLoginHomepage') ||
+      (html.includes('<title>Instagram</title>') && !html.includes('shortcode_media'));
+
+    if (isClientShell) {
+      return {
+        ok: false,
+        status: 'authentication_required',
+        provider: this.id,
+        shortcode,
+        error: {
+          code: 'LOGIN_WALL_ENCOUNTERED',
+          message: 'Instagram served an unauthenticated web shell requiring login to view this post. Connect an authorized Meta account or provide an access token.'
+        }
+      };
+    }
+
     return {
       ok: false,
       status: 'unsupported_content',
       provider: this.id,
       shortcode,
       error: {
-        code: 'CONTENT_UNAVAILABLE',
+        code: 'METADATA_NOT_FOUND',
         message: 'Could not extract media metadata from the public Instagram page.'
       }
     };
@@ -473,5 +529,266 @@ export class PublicWebMediaProvider implements IMediaProvider {
       .replace(/&#064;/g, '@')
       .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(Number(dec)))
       .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)));
+  }
+
+  canDiscoverProfile(urlOrUsername: string): boolean {
+    if (!urlOrUsername) return false;
+    const clean = urlOrUsername.trim().replace(/^@/, '');
+    if (clean.includes('/')) {
+      const parsed = parseInstagramUrl(clean);
+      return parsed.valid && parsed.contentType === 'profile';
+    }
+    return USERNAME_REGEX.test(clean);
+  }
+
+  async discoverProfile(
+    urlOrUsername: string,
+    options?: ProfileDiscoveryOptions
+  ): Promise<ProfileDiscoveryResult> {
+    let username = urlOrUsername.trim();
+    if (username.includes('/')) {
+      const parsed = parseInstagramUrl(username);
+      if (parsed.valid && parsed.username) {
+        username = parsed.username;
+      } else {
+        const parts = username.split('/').filter(Boolean);
+        username = parts.pop() || username;
+      }
+    }
+    username = username.replace(/^@/, '');
+
+    if (!USERNAME_REGEX.test(username)) {
+      return {
+        ok: false,
+        provider: this.name,
+        error: {
+          code: 'INVALID_URL',
+          message: `Invalid Instagram username format: '${username}'`
+        }
+      };
+    }
+
+    if (options?.cursor && (!/^[a-zA-Z0-9_.:=+-]{1,512}$/.test(options.cursor) || options.cursor.includes('..'))) {
+      return {
+        ok: false,
+        provider: this.name,
+        error: {
+          code: 'INVALID_URL',
+          message: 'Invalid pagination cursor format'
+        }
+      };
+    }
+
+    const canonicalProfileUrl = options?.cursor
+      ? `https://www.instagram.com/${username}/?max_id=${encodeURIComponent(options.cursor)}`
+      : `https://www.instagram.com/${username}/`;
+
+    try {
+      const safeResponse = await safeHttpsRequest(canonicalProfileUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Sec-Fetch-Dest': 'document',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none'
+        },
+        timeoutMs: this.timeoutMs,
+        maxResponseSizeBytes: 8 * 1024 * 1024 // 8MB ceiling
+      });
+
+      if (safeResponse.statusCode === 404) {
+        safeResponse.stream.destroy();
+        return {
+          ok: false,
+          provider: this.name,
+          error: {
+            code: 'POST_NOT_FOUND',
+            message: `Instagram profile '@${username}' was not found or has been removed.`
+          }
+        };
+      }
+
+      if (safeResponse.statusCode === 429) {
+        safeResponse.stream.destroy();
+        const retryHeader = safeResponse.headers['retry-after'];
+        const retrySeconds = parseRetryAfter(retryHeader);
+        const message = formatRateLimitMessage(retrySeconds);
+        return {
+          ok: false,
+          provider: this.name,
+          error: {
+            code: 'RATE_LIMITED',
+            message,
+            ...(retrySeconds && retrySeconds > 0 ? { retryAfterSeconds: retrySeconds } : {})
+          }
+        };
+      }
+
+      const chunks: Buffer[] = [];
+      for await (const chunk of safeResponse.stream) {
+        chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+      }
+      const html = Buffer.concat(chunks).toString('utf-8');
+
+      // Check for login wall
+      const isLoginWall =
+        safeResponse.finalUrl.includes('/accounts/login') ||
+        html.includes('/accounts/login/') ||
+        html.includes('Login • Instagram') ||
+        html.includes('"require_login":true') ||
+        html.includes('login-box');
+
+      const extracted = this.extractProfileFromHtml(html, username);
+      if (extracted) {
+        return extracted;
+      }
+
+      if (isLoginWall) {
+        return {
+          ok: false,
+          provider: this.name,
+          error: {
+            code: 'LOGIN_WALL_ENCOUNTERED',
+            message: options?.cursor
+              ? 'Instagram requires account authorization to paginate beyond initial posts. Please connect an authorized Instagram account or Meta Graph API token.'
+              : 'Instagram requires account authorization to view profile timelines anonymously. Connect your Meta account or provide an access token to discover all media.'
+          }
+        };
+      }
+
+      return {
+        ok: false,
+        provider: this.name,
+        error: {
+          code: 'CONTENT_UNAVAILABLE',
+          message: `Unable to read media timeline for '@${username}'. The account may be restricted or private.`
+        }
+      };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Public profile discovery failure';
+      return {
+        ok: false,
+        provider: this.name,
+        error: {
+          code: 'PROVIDER_ERROR',
+          message: `Failed to load profile for '@${username}': ${msg}`
+        }
+      };
+    }
+  }
+
+  private extractProfileFromHtml(html: string, fallbackUsername: string): ProfileDiscoveryResult | null {
+    // Attempt parsing JSON data blobs embedded in Instagram HTML
+    const jsonMatches = html.match(/<script type="application\/json"[^>]*>([\s\S]*?)<\/script>/gi) || [];
+
+    for (const tag of jsonMatches) {
+      const content = tag.replace(/^<script[^>]*>/i, '').replace(/<\/script>$/i, '').trim();
+      if (!content.includes('edge_owner_to_timeline_media') && !content.includes('ProfilePage')) {
+        continue;
+      }
+
+      try {
+        const parsed = JSON.parse(content);
+        const user = this.findUserNodeInObject(parsed);
+        if (user) {
+          if (user.is_private && !user.edge_owner_to_timeline_media?.edges?.length) {
+            return {
+              ok: false,
+              provider: this.name,
+              error: {
+                code: 'PRIVATE_ACCOUNT',
+                message: `The Instagram account '@${user.username || fallbackUsername}' is private.`
+              }
+            };
+          }
+
+          const timeline = user.edge_owner_to_timeline_media;
+          const edges = timeline?.edges || [];
+          const items: ProfileMediaItem[] = [];
+
+          for (const edge of edges) {
+            const node = edge.node;
+            if (!node || !node.shortcode) continue;
+
+            const isVideo = !!node.is_video;
+            const isCarousel = node.__typename === 'GraphSidecar' || !!node.edge_sidecar_to_children;
+            const type: 'image' | 'video' | 'carousel' = isCarousel ? 'carousel' : isVideo ? 'video' : 'image';
+
+            const item: ProfileMediaItem = {
+              id: node.id || `post_${node.shortcode}`,
+              shortcode: node.shortcode,
+              url: `https://www.instagram.com/p/${node.shortcode}/`,
+              type,
+              thumbnailUrl: node.thumbnail_src || node.display_url || '',
+              displayUrl: node.display_url || '',
+              caption: node.edge_media_to_caption?.edges?.[0]?.node?.text,
+              likesCount: node.edge_media_preview_like?.count ?? node.edge_liked_by?.count,
+              commentsCount: node.edge_media_to_comment?.count,
+              timestamp: node.taken_at_timestamp ? node.taken_at_timestamp * 1000 : undefined
+            };
+
+            if (isCarousel && node.edge_sidecar_to_children?.edges) {
+              item.carouselMedia = node.edge_sidecar_to_children.edges.map((cEdge: any, idx: number) => {
+                const cNode = cEdge.node;
+                return {
+                  id: cNode.id || `${item.id}_${idx}`,
+                  type: cNode.is_video ? 'video' : 'image',
+                  url: cNode.video_url || cNode.display_url,
+                  thumbnailUrl: cNode.display_url,
+                  width: cNode.dimensions?.width,
+                  height: cNode.dimensions?.height
+                };
+              });
+            }
+
+            items.push(item);
+          }
+
+          const profileInfo: ProfileInfo = {
+            username: user.username || fallbackUsername,
+            fullName: user.full_name || user.username || fallbackUsername,
+            biography: user.biography,
+            avatarUrl: user.profile_pic_url_hd || user.profile_pic_url,
+            isPrivate: !!user.is_private,
+            isVerified: !!user.is_verified,
+            postsCount: timeline?.count ?? items.length,
+            followersCount: user.edge_followed_by?.count,
+            followingCount: user.edge_follow?.count
+          };
+
+          const pageInfo = timeline?.page_info;
+          return {
+            ok: true,
+            provider: this.name,
+            profile: profileInfo,
+            items,
+            pagination: {
+              hasMore: !!pageInfo?.has_next_page,
+              nextCursor: pageInfo?.end_cursor,
+              totalLoaded: items.length
+            }
+          };
+        }
+      } catch {
+        // Skip unparseable JSON blocks
+      }
+    }
+
+    return null;
+  }
+
+  private findUserNodeInObject(obj: any): any {
+    if (!obj || typeof obj !== 'object') return null;
+    if (obj.edge_owner_to_timeline_media || (obj.username && obj.profile_pic_url)) {
+      return obj;
+    }
+    for (const val of Object.values(obj)) {
+      const found = this.findUserNodeInObject(val);
+      if (found) return found;
+    }
+    return null;
   }
 }
