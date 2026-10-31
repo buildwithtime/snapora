@@ -268,4 +268,3 @@ describe('POST /api/profile/discover', () => {
     await localApp.close();
   });
 });
-

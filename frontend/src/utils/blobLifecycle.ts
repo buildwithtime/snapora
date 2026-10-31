@@ -135,4 +135,3 @@ export function resetBlobUrlRegistry(): void {
   }
   activeBlobUrls.clear();
 }
-

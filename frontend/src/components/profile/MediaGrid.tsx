@@ -47,4 +47,3 @@ export const MediaGrid: React.FC<MediaGridProps> = ({ onItemQueued }) => {
     </div>
   );
 };
-

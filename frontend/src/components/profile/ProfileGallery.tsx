@@ -200,4 +200,3 @@ export const ProfileGallery: React.FC = () => {
     </section>
   );
 };
-

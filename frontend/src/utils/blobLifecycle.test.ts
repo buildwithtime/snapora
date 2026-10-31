@@ -99,4 +99,3 @@ describe('Browser Blob URL Lifecycle Manager', () => {
     expect(getActiveTrackedBlobUrlCount()).toBe(0);
   });
 });
-

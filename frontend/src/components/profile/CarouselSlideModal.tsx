@@ -207,4 +207,3 @@ export const CarouselSlideModal: React.FC = () => {
     </div>
   );
 };
-

@@ -197,4 +197,3 @@ export const ProfileHeader: React.FC = () => {
     </div>
   );
 };
-

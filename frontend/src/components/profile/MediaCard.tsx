@@ -256,4 +256,3 @@ export const MediaCard: React.FC<MediaCardProps> = ({ item, onSingleQueued }) =>
     </div>
   );
 };
-
