@@ -1,6 +1,6 @@
 # Snapora ⚡
 
-> **Modern, secure, open-source multi-URL media downloader queue & live preview engine**
+> **Discover and download accessible public Instagram media, with additional account-owned media discovery through authorized Meta integration.**
 >
 > 🌐 **Initial Public Deployment**: [https://snapora-1r3i.onrender.com/](https://snapora-1r3i.onrender.com/) (Hosted on Render)
 
@@ -33,6 +33,7 @@ Snapora is an open-source, client-first media utility engineered for reliability
   - Batch selection toolbar (`Select All`, `Select None`, `Invert`) that persists across multi-page cursor pagination.
   - Carousel inspection modal to preview and selectively download individual slides or queue complete albums.
   - Seamless integration with the core sequential download queue and bulk ZIP export engine.
+  - Standardized memory limits: up to 500 posts discoverable per gallery session (`MAX_PROFILE_ITEMS = 500`) and up to 50 media files per browser ZIP archive (`MAX_ZIP_ITEMS = 50`, `MAX_ZIP_TOTAL_BYTES = 500 MB`) to prevent client tab heap exhaustion.
 - **Sequential Multi-URL Queue**: Add multiple URLs at once (newline-separated or comma-delimited) and process them sequentially with pause, resume, retry, and cancellation controls.
 - **Enhanced Instagram URL Support**: Robust normalization for `/p/`, `/reel/`, `/reels/`, `/tv/`, `m.instagram.com`, `instagr.am`, and direct Meta CDN URLs (`scontent*.cdninstagram.com`), stripping tracking parameters (`?igsh=...`, `?utm_source=...`) and hash fragments.
 - **Formalized Provider Architecture (`IMediaProvider`)**:
@@ -161,7 +162,7 @@ Copy `.env.example` to `.env` or configure these environment variables in your h
 | `RATE_LIMIT_MAX` | No | `30` | Maximum requests allowed per IP within the time window. |
 | `RATE_LIMIT_WINDOW_MS` | No | `60000` | Rate limiting sliding window in milliseconds (default: 60s). |
 | `RESOLVER_TIMEOUT_MS` | No | `10000` | Network request timeout for upstream post resolution. |
-| `MAX_RESPONSE_SIZE_BYTES`| No | `52428800` | Maximum allowable media stream byte size (default: 50 MB). |
+| `MAX_RESPONSE_SIZE_BYTES`| No | `157286400` | Maximum allowable media stream byte size (default: 150 MB). |
 | `VITE_API_BASE_URL` | No | `""` | Frontend API base URL. Leave empty when frontend is served from the same server. |
 
 ---
@@ -210,9 +211,12 @@ pm2 startup
 
 ---
 
-## ⚠️ Known Limitations
+## ⚠️ Known Limitations & Access Boundaries
 
-* **Private Instagram Content**: Snapora is intentionally designed for public media retrieval. It cannot and will not download posts, reels, or stories from private Instagram accounts without explicit user access tokens via `AuthorizedAccountMediaProvider`.
+* **No Claim of Universal Post Downloading**: Snapora does not claim or guarantee that every Instagram post can be downloaded anonymously. Instagram dynamically serves unauthenticated client shells or login walls for many posts, Reels, and profiles when queried without active session cookies.
+* **Strict Respect for Private Profiles**: Snapora cannot and will not download posts, Reels, or stories from private Instagram accounts.
+* **No Login Wall or Anti-Bot Circumvention**: Snapora strictly complies with platform boundaries. It does not rotate residential proxies, harvest session cookies, or bypass Instagram authentication challenges.
+* **Authorized Meta Graph API Boundaries**: Connecting an authorized Meta access token strictly unlocks media belonging to the authenticated user's own managed creator or business account (`/me/media`). It does not grant access to arbitrary third-party Instagram accounts or private posts.
 * **Ephemeral Instagram Stories**: Stories require active account sessions and are not supported by the public anonymous web resolver.
 * **Upstream Rate Limiting**: Instagram may throttle unauthenticated requests from shared hosting or cloud IP addresses (HTTP 429). Snapora incorporates retry mechanisms and socket-level timeouts, but heavy bulk queues should be processed with reasonable pauses.
 * **Meta oEmbed Preview Scope**: Meta's public oEmbed API supplies embed frames and thumbnail metadata, but does not provide direct raw downloadable media files.
@@ -229,7 +233,7 @@ pm2 startup
   * *Fix*: Snapora does not harvest user cookies or bypass platform logins. Verify the link is publicly accessible in an Incognito browser window.
 * **CORS Errors in Decoupled Deployments**:
   * *Cause*: Frontend domain is not listed in `CORS_ORIGIN`.
-  * *Fix*: Set `CORS_ORIGIN=https://your-frontend-domain.com` in backend environment settings. Alternatively, use Unified Single-Service Deployment to eliminate CORS entirely.
+  * *Fix*: Set `CORS_ORIGIN=https://your-frontend-domain.com` (or comma-separated `CORS_PREVIEW_ORIGINS`) in backend environment settings. In production, CORS strictly defaults to `https://snapora-1r3i.onrender.com`. Alternatively, use Unified Single-Service Deployment to serve frontend and backend from the same origin.
 * **Health Check Probes**:
   * Both `/health` and `/api/health` respond with HTTP 200 `{ "ok": true, "status": "healthy" }` and can be used directly for cloud load balancer and container liveness probes.
 

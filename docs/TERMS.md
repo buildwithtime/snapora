@@ -35,8 +35,9 @@ You agree that you will:
 ## 4. Platform Limitations & No Guarantee of Continuous Service
 
 * Snapora relies on upstream public web interfaces and APIs provided by Meta Platforms, Inc. Changes to upstream APIs, login walls, rate-limits, or platform restrictions may affect or disable media resolution at any time without notice.
-* Snapora does not guarantee that any specific Instagram link, post, Reel, or carousel will be resolvable or downloadable.
+* Snapora does not guarantee that every Instagram link, post, Reel, or carousel will be resolvable or downloadable.
 * Snapora does not circumvent platform login walls or access private accounts.
+* Authorized Meta Graph API integration permits access only to media belonging to the authenticated user's own managed creator or business account, and does not unlock arbitrary third-party accounts.
 
 ---
 

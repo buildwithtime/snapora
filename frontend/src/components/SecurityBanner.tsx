@@ -38,7 +38,7 @@ export const SecurityBanner: React.FC = () => {
           <div>
             <strong style={{ color: 'var(--text-main)', fontSize: '0.95rem' }}>Snapora Media Queue</strong>
             <span style={{ margin: '0 0.5rem', color: 'var(--text-muted)' }}>·</span>
-            <span style={{ color: 'var(--text-secondary)' }}>Clean, private Instagram media queue</span>
+            <span style={{ color: 'var(--text-secondary)' }}>Privacy-first queue for accessible public Instagram media</span>
           </div>
         </div>
 
