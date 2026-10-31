@@ -1,0 +1,81 @@
+name: Bug Report
+description: Create a report to help us reproduce and fix an issue.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for reporting an issue! Please ensure the post or profile link is publicly accessible in an Incognito browser window. Snapora does not download private accounts or bypass Instagram login walls.
+
+  - type: input
+    id: url_format
+    attributes:
+      label: Instagram URL Format
+      description: What type of URL caused the issue? (e.g., photo post, video reel, carousel, profile handle)
+      placeholder: e.g. https://www.instagram.com/p/SHORTCODE/ or @username
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Media Provider Used
+      description: Which provider engine was active?
+      options:
+        - Public (Default - Anonymous Web Resolver)
+        - Mock (Offline Test Fixtures)
+        - Official Meta oEmbed
+        - Authorized Account Media
+        - Direct CDN Link
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction_steps
+    attributes:
+      label: Steps to Reproduce
+      description: Step-by-step instructions to reproduce the behavior.
+      placeholder: |
+        1. Paste URL '...' into the input field.
+        2. Click 'Fetch Media'.
+        3. See error response.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_behavior
+    attributes:
+      label: Expected Behavior
+      description: A clear description of what you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual_behavior
+    attributes:
+      label: Actual Behavior / Error Message
+      description: What actually occurred (include HTTP status code or UI error banner).
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment Info
+      description: Browser, OS version, or deployment topology (e.g. Chrome 129 on Windows, or Render web service).
+      placeholder: e.g. Firefox 131, Windows 11, Node.js 22 LTS
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: verification
+    attributes:
+      label: Pre-Submission Verification
+      options:
+        - label: I have verified this is not a private account (Snapora does not download private media).
+          required: true
+        - label: I understand that Instagram frequently presents login walls (HTTP 403) for unauthenticated web requests, which is platform behavior rather than an application crash.
+          required: true
+        - label: I have checked existing issues to verify this is not a duplicate.
+          required: true

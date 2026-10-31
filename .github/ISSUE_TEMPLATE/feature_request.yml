@@ -1,0 +1,43 @@
+name: Feature Request
+description: Suggest an idea or enhancement for Snapora.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for suggesting an improvement! Please note that Snapora operates strictly under a Zero-Credential model and will not add proxy scrapers, session cookie harvesters, or private account circumvention tools.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or Limitation
+      description: Is your feature request related to a problem or current limitation?
+      placeholder: A clear and concise description of the limitation or workflow hurdle.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed_solution
+    attributes:
+      label: Proposed Solution / Enhancement
+      description: Describe what you would like Snapora to do.
+      placeholder: Detailed description of the feature or architectural change.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any alternative solutions or workarounds you have evaluated.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: terms_alignment
+    attributes:
+      label: Design & Privacy Alignment
+      options:
+        - label: This proposed feature respects Snapora's Zero-Credential and privacy-first model (no session cookie harvesting or platform password handling).
+          required: true

@@ -1,0 +1,63 @@
+name: Release Draft
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  draft-release:
+    name: Verify & Draft GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate semantic version tag format
+        run: |
+          if ! [[ "${{ github.ref_name }}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Error: Tag '${{ github.ref_name }}' does not match strict semver format (e.g. v0.3.0 or v0.3.0-preview)"
+            exit 1
+          fi
+
+      - name: Setup Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify linter
+        run: npm run lint
+
+      - name: Verify TypeScript compilation
+        run: npm run typecheck
+
+      - name: Run automated test suites
+        run: npm test
+
+      - name: Verify production build
+        run: npm run build
+
+      - name: Package compiled distribution artifacts
+        run: |
+          tar -czf snapora-frontend-dist-${{ github.ref_name }}.tar.gz -C frontend/dist .
+
+      - name: Create GitHub Release Draft
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          draft: true
+          prerelease: ${{ contains(github.ref_name, '-preview') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+          files: |
+            snapora-frontend-dist-${{ github.ref_name }}.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
