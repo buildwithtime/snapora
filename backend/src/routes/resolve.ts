@@ -46,6 +46,16 @@ export async function resolveRoutes(app: FastifyInstance, options?: { provider?:
         );
       }
 
+      // Explicitly reject profile URLs at resolve endpoint (must use profile discovery)
+      if (validation.mediaType === 'profile') {
+        return reply.status(400).send(
+          createErrorResponse(
+            'INVALID_REQUEST',
+            `The provided URL points to an Instagram profile (@${validation.username || 'user'}). Use the /api/profile/discover endpoint for profile gallery discovery.`
+          )
+        );
+      }
+
       // Provider selection
       const provider = options?.provider || providerRegistry.selectProviderForUrl(validation.normalizedUrl, preferredProviderId);
 

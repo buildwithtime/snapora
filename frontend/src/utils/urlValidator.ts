@@ -285,6 +285,13 @@ export function parseBatchUrls(text: string): {
 
   for (const line of lines) {
     const res = parseInstagramUrl(line);
+    if (res.valid && res.mediaType === 'profile') {
+      invalid.push({
+        url: line,
+        error: `Profile URL '@${res.username}' belongs in the Profile Gallery, not the individual post download queue.`
+      });
+      continue;
+    }
     if (res.valid && res.normalizedUrl && res.shortcode && res.mediaType) {
       if (!seenUrls.has(res.normalizedUrl)) {
         seenUrls.add(res.normalizedUrl);

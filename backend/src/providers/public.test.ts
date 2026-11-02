@@ -359,4 +359,131 @@ describe('PublicWebMediaProvider Suite', () => {
       expect(res.status).toBe('provider_error');
     }
   });
+
+  describe('Public Profile Discovery & Identity Validation', () => {
+    it('rejects anonymous cursor pagination with UNSUPPORTED_RETRIEVAL_METHOD', async () => {
+      const res = await provider.discoverProfile('https://www.instagram.com/creator_studio/', { cursor: 'cursor_page_2' });
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.error.code).toBe('UNSUPPORTED_RETRIEVAL_METHOD');
+        expect(res.error.message).toContain('Instagram does not support anonymous pagination on public profiles');
+      }
+    });
+
+    it('classifies login wall HTML as LOGIN_WALL_ENCOUNTERED without extracting unrelated scripts', async () => {
+      const loginWallHtml = `<!DOCTYPE html><html><head><title>Login • Instagram</title></head><body>
+        <script type="application/json">{"suggested_users": [{"username": "unrelated_creator", "profile_pic_url": "https://cdn.example.com/pic.jpg"}]}</script>
+        <div class="login-box">Please log in to continue</div>
+      </body></html>`;
+
+      vi.spyOn(ssrfClient, 'safeHttpsRequest').mockResolvedValue({
+        statusCode: 200,
+        headers: { 'content-type': 'text/html' },
+        stream: Readable.from([loginWallHtml]) as any,
+        finalUrl: 'https://www.instagram.com/accounts/login/?next=/creator_studio/'
+      });
+
+      const res = await provider.discoverProfile('creator_studio');
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.error.code).toBe('LOGIN_WALL_ENCOUNTERED');
+      }
+    });
+
+    it('rejects suggested users and extracts only the node matching the requested username', async () => {
+      const profileHtml = `<!DOCTYPE html><html><head><title>Target Creator (@target_creator) • Instagram</title></head><body>
+        <script type="application/json">
+        {
+          "entry_data": {
+            "ProfilePage": [{
+              "edge_suggested_users": {
+                "edges": [{
+                  "node": {
+                    "username": "some_other_influencer",
+                    "profile_pic_url": "https://cdn.example.com/other.jpg"
+                  }
+                }]
+              },
+              "graphql": {
+                "user": {
+                  "username": "target_creator",
+                  "full_name": "Target Creator",
+                  "biography": "Official photography profile.",
+                  "profile_pic_url": "https://cdn.example.com/target_avatar.jpg",
+                  "is_private": false,
+                  "is_verified": true,
+                  "edge_owner_to_timeline_media": {
+                    "count": 1,
+                    "page_info": { "has_next_page": false },
+                    "edges": [{
+                      "node": {
+                        "id": "111222333",
+                        "shortcode": "CtArGeT123",
+                        "is_video": false,
+                        "display_url": "https://scontent.cdninstagram.com/v/target_post.jpg?oh=1",
+                        "thumbnail_src": "https://scontent.cdninstagram.com/v/target_thumb.jpg?oh=1",
+                        "edge_media_to_caption": { "edges": [{ "node": { "text": "Post caption" } }] }
+                      }
+                    }]
+                  }
+                }
+              }
+            }]
+          }
+        }
+        </script>
+      </body></html>`;
+
+      vi.spyOn(ssrfClient, 'safeHttpsRequest').mockResolvedValue({
+        statusCode: 200,
+        headers: { 'content-type': 'text/html' },
+        stream: Readable.from([profileHtml]) as any,
+        finalUrl: 'https://www.instagram.com/target_creator/'
+      });
+
+      const res = await provider.discoverProfile('target_creator');
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.profile.username).toBe('target_creator');
+        expect(res.profile.profileUrl).toBe('https://www.instagram.com/target_creator/');
+        expect(res.profile.fullName).toBe('Target Creator');
+        expect(res.items).toHaveLength(1);
+        expect(res.items[0].shortcode).toBe('CtArGeT123');
+      }
+    });
+
+    it('returns CONTENT_UNAVAILABLE when only unrelated suggested creators exist in HTML', async () => {
+      const unrelatedHtml = `<!DOCTYPE html><html><head><title>Instagram</title></head><body>
+        <script type="application/json">
+        {
+          "entry_data": {
+            "ProfilePage": [{
+              "edge_suggested_users": {
+                "edges": [{
+                  "node": {
+                    "username": "unrelated_creator",
+                    "profile_pic_url": "https://cdn.example.com/other.jpg"
+                  }
+                }]
+              }
+            }]
+          }
+        }
+        </script>
+      </body></html>`;
+
+      vi.spyOn(ssrfClient, 'safeHttpsRequest').mockResolvedValue({
+        statusCode: 200,
+        headers: { 'content-type': 'text/html' },
+        stream: Readable.from([unrelatedHtml]) as any,
+        finalUrl: 'https://www.instagram.com/requested_creator/'
+      });
+
+      const res = await provider.discoverProfile('requested_creator');
+      expect(res.ok).toBe(false);
+      if (!res.ok) {
+        expect(res.error.code).toBe('CONTENT_UNAVAILABLE');
+      }
+    });
+  });
 });

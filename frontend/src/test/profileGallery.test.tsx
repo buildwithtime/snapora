@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import App from '../App.js';
 import * as storage from '../utils/storage.js';
@@ -15,7 +15,12 @@ vi.mock('../utils/storage.js', () => ({
 describe('Instagram Profile Discovery & Selective Downloading Gallery', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv('VITE_DEMO_MODE', 'true');
     (storage.loadJobsFromStorage as any).mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('detects profile URL submission and renders profile gallery with items', async () => {

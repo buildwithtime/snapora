@@ -568,20 +568,20 @@ export class PublicWebMediaProvider implements IMediaProvider {
       };
     }
 
-    if (options?.cursor && (!/^[a-zA-Z0-9_.:=+-]{1,512}$/.test(options.cursor) || options.cursor.includes('..'))) {
+    if (options?.cursor) {
+      // Instagram does not support anonymous pagination on public web profiles.
+      // Modern web endpoints ignore ?max_id= and require authorized Meta Graph API or session credentials.
       return {
         ok: false,
         provider: this.name,
         error: {
-          code: 'INVALID_URL',
-          message: 'Invalid pagination cursor format'
+          code: 'UNSUPPORTED_RETRIEVAL_METHOD',
+          message: 'Instagram does not support anonymous pagination on public profiles. More results cannot currently be retrieved without an authorized access token.'
         }
       };
     }
 
-    const canonicalProfileUrl = options?.cursor
-      ? `https://www.instagram.com/${username}/?max_id=${encodeURIComponent(options.cursor)}`
-      : `https://www.instagram.com/${username}/`;
+    const canonicalProfileUrl = `https://www.instagram.com/${username}/`;
 
     try {
       const safeResponse = await safeHttpsRequest(canonicalProfileUrl, {
@@ -633,7 +633,7 @@ export class PublicWebMediaProvider implements IMediaProvider {
       }
       const html = Buffer.concat(chunks).toString('utf-8');
 
-      // Check for login wall
+      // Check for login wall before attempting HTML extraction
       const isLoginWall =
         safeResponse.finalUrl.includes('/accounts/login') ||
         html.includes('/accounts/login/') ||
@@ -641,22 +641,20 @@ export class PublicWebMediaProvider implements IMediaProvider {
         html.includes('"require_login":true') ||
         html.includes('login-box');
 
-      const extracted = this.extractProfileFromHtml(html, username);
-      if (extracted) {
-        return extracted;
-      }
-
       if (isLoginWall) {
         return {
           ok: false,
           provider: this.name,
           error: {
             code: 'LOGIN_WALL_ENCOUNTERED',
-            message: options?.cursor
-              ? 'Instagram requires account authorization to paginate beyond initial posts. Please connect an authorized Instagram account or Meta Graph API token.'
-              : 'Instagram requires account authorization to view profile timelines anonymously. Connect your Meta account or provide an access token to discover all media.'
+            message: 'Instagram requires account authorization to view profile timelines anonymously. Connect your Meta account or provide an access token to discover all media.'
           }
         };
+      }
+
+      const extracted = this.extractProfileFromHtml(html, username);
+      if (extracted) {
+        return extracted;
       }
 
       return {
@@ -692,15 +690,20 @@ export class PublicWebMediaProvider implements IMediaProvider {
 
       try {
         const parsed = JSON.parse(content);
-        const user = this.findUserNodeInObject(parsed);
+        const user = this.findUserNodeInObject(parsed, fallbackUsername);
         if (user) {
+          // Strictly reject any node whose username does not match the requested username
+          if (user.username && user.username.toLowerCase().trim() !== fallbackUsername.toLowerCase().trim()) {
+            continue;
+          }
+
           if (user.is_private && !user.edge_owner_to_timeline_media?.edges?.length) {
             return {
               ok: false,
               provider: this.name,
               error: {
                 code: 'PRIVATE_ACCOUNT',
-                message: `The Instagram account '@${user.username || fallbackUsername}' is private.`
+                message: `The Instagram account '@${fallbackUsername}' is private.`
               }
             };
           }
@@ -748,8 +751,9 @@ export class PublicWebMediaProvider implements IMediaProvider {
           }
 
           const profileInfo: ProfileInfo = {
-            username: user.username || fallbackUsername,
-            fullName: user.full_name || user.username || fallbackUsername,
+            username: fallbackUsername,
+            profileUrl: `https://www.instagram.com/${fallbackUsername}/`,
+            fullName: user.full_name || fallbackUsername,
             biography: user.biography,
             avatarUrl: user.profile_pic_url_hd || user.profile_pic_url,
             isPrivate: !!user.is_private,
@@ -780,13 +784,28 @@ export class PublicWebMediaProvider implements IMediaProvider {
     return null;
   }
 
-  private findUserNodeInObject(obj: any): any {
+  private findUserNodeInObject(obj: any, targetUsername: string): any {
     if (!obj || typeof obj !== 'object') return null;
-    if (obj.edge_owner_to_timeline_media || (obj.username && obj.profile_pic_url)) {
-      return obj;
+
+    const cleanTarget = targetUsername.toLowerCase().trim();
+
+    // Check if this object represents the target user with timeline media
+    if (obj.edge_owner_to_timeline_media) {
+      const nodeUsername = typeof obj.username === 'string' ? obj.username.toLowerCase().trim() : '';
+      if (!nodeUsername || nodeUsername === cleanTarget) {
+        return obj;
+      }
     }
+
+    // Check if object matches target user with profile details
+    if (obj.username && typeof obj.username === 'string' && obj.username.toLowerCase().trim() === cleanTarget) {
+      if (obj.profile_pic_url || obj.edge_owner_to_timeline_media || obj.is_private !== undefined) {
+        return obj;
+      }
+    }
+
     for (const val of Object.values(obj)) {
-      const found = this.findUserNodeInObject(val);
+      const found = this.findUserNodeInObject(val, targetUsername);
       if (found) return found;
     }
     return null;

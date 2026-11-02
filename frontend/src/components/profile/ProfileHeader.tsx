@@ -15,6 +15,8 @@ export const ProfileHeader: React.FC = () => {
 
   if (!profile) return null;
 
+  const authoritativeProfileUrl = profile.profileUrl || `https://www.instagram.com/${profile.username}/`;
+
   return (
     <div className="glass-panel profile-header-container" style={{ padding: '1.75rem', marginBottom: '1.5rem' }}>
       <div style={{ display: 'flex', gap: '1.75rem', alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -70,9 +72,17 @@ export const ProfileHeader: React.FC = () => {
         {/* Profile Info & Stats */}
         <div style={{ flex: 1, minWidth: '260px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
-            <h2 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>
-              @{profile.username}
-            </h2>
+            <a
+              href={authoritativeProfileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ textDecoration: 'none', color: 'inherit' }}
+              title={`Open @${profile.username} on Instagram`}
+            >
+              <h2 style={{ fontSize: '1.4rem', fontWeight: 700, margin: 0, letterSpacing: '-0.02em', cursor: 'pointer' }}>
+                @{profile.username}
+              </h2>
+            </a>
 
             {profile.isVerified && (
               <span
@@ -174,7 +184,7 @@ export const ProfileHeader: React.FC = () => {
         {/* Action Controls */}
         <div style={{ display: 'flex', gap: '0.5rem', alignSelf: 'flex-start' }}>
           <a
-            href={`https://www.instagram.com/${profile.username}/`}
+            href={authoritativeProfileUrl}
             target="_blank"
             rel="noopener noreferrer"
             className="btn btn-secondary btn-sm"
