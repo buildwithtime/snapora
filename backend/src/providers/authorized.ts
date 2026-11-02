@@ -494,6 +494,7 @@ export class AuthorizedAccountMediaProvider implements IMediaProvider {
       const cleanUsername = profileData.username || urlOrUsername.replace(/https?:\/\/(?:www\.)?instagram\.com\//, '').replace(/\/$/, '').replace(/^@/, '');
       const profileInfo: ProfileInfo = {
         username: cleanUsername,
+        profileUrl: `https://www.instagram.com/${cleanUsername}/`,
         fullName: profileData.name || cleanUsername,
         biography: profileData.biography,
         avatarUrl: profileData.profile_picture_url,

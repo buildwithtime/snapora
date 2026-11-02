@@ -167,6 +167,22 @@ describe('Snapora Backend API & Security Suite', () => {
       expect(json.error.message).toBe('Instagram is temporarily limiting requests. Please try again in 60 seconds.');
       expect(json.error.retryAfterSeconds).toBe(60);
     });
+
+    it('rejects Instagram profile URLs with HTTP 400 INVALID_REQUEST to protect download queue', async () => {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/resolve',
+        payload: {
+          url: 'https://www.instagram.com/natgeo/'
+        }
+      });
+
+      expect(response.statusCode).toBe(400);
+      const json = response.json();
+      expect(json.ok).toBe(false);
+      expect(json.error.code).toBe('INVALID_REQUEST');
+      expect(json.error.message).toContain('points to an Instagram profile (@natgeo)');
+    });
   });
 
   describe('POST /api/resolve — SSRF and Security Hardening', () => {

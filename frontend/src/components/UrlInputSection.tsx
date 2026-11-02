@@ -63,13 +63,20 @@ export const UrlInputSection: React.FC = () => {
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
 
-    // Profile URL check
-    const profileLines = lines.filter((line) => {
-      const parsed = parseInstagramUrl(line);
-      return parsed.valid && parsed.mediaType === 'profile';
-    });
+    // Separate profile URLs from media post/reel URLs
+    const profileLines: string[] = [];
+    const mediaLines: string[] = [];
 
-    if (profileLines.length > 0 && profileLines.length === lines.length) {
+    for (const line of lines) {
+      const parsed = parseInstagramUrl(line);
+      if (parsed.valid && parsed.mediaType === 'profile') {
+        profileLines.push(line);
+      } else {
+        mediaLines.push(line);
+      }
+    }
+
+    if (profileLines.length > 0 && mediaLines.length === 0) {
       const firstParsed = parseInstagramUrl(profileLines[0]);
       loadProfile(profileLines[0]);
       setFeedback({
@@ -87,7 +94,8 @@ export const UrlInputSection: React.FC = () => {
       loadProfile(profileLines[0]);
     }
 
-    const result = addUrls(inputText);
+    // Only non-profile lines enter the download queue
+    const result = addUrls(mediaLines.join('\n'));
 
     if (result.addedCount > 0) {
       const parts = [`Added ${result.addedCount} URL${result.addedCount > 1 ? 's' : ''} to queue`];
@@ -107,6 +115,7 @@ export const UrlInputSection: React.FC = () => {
         message: `All ${result.duplicateCount} URL${result.duplicateCount > 1 ? 's' : ''} are already in queue`,
         type: 'warn'
       });
+      setInputText('');
     } else if (profileLines.length > 0) {
       setFeedback({
         message: 'Opened Instagram profile media gallery.',

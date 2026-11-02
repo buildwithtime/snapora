@@ -1,5 +1,6 @@
 export interface ProfileInfo {
   username: string;
+  profileUrl?: string;
   fullName?: string;
   biography?: string;
   avatarUrl?: string;

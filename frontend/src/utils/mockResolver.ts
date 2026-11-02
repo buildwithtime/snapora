@@ -357,6 +357,7 @@ export async function discoverProfileClientMock(
     provider: 'MockProvider (Demo Mode)',
     profile: {
       username: clean,
+      profileUrl: `https://www.instagram.com/${clean}/`,
       fullName: `${clean.charAt(0).toUpperCase() + clean.slice(1)} Visuals`,
       biography: `Design, architecture, and editorial photography. Demo profile for Snapora.`,
       avatarUrl: `https://picsum.photos/seed/${clean}_avatar/300/300`,

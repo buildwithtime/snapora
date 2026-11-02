@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useReducer, useCallback, useMemo, useRef } from 'react';
 import {
   ProfileGalleryState,
   ProfileInfo,
@@ -199,6 +199,13 @@ const ProfileGalleryContext = createContext<ProfileGalleryContextType | undefine
 
 export const ProfileGalleryProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [state, dispatch] = useReducer(profileGalleryReducer, initialState);
+  const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true';
+  const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
+
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const loadMoreAbortControllerRef = useRef<AbortController | null>(null);
+  const requestIdRef = useRef<number>(0);
+  const activeUsernameRef = useRef<string>('');
 
   const filteredItems = useMemo(() => {
     if (state.filter === 'all') return state.items;
@@ -206,25 +213,63 @@ export const ProfileGalleryProvider: React.FC<{ children: React.ReactNode }> = (
   }, [state.items, state.filter]);
 
   const loadProfile = useCallback(async (urlOrUsername: string) => {
-    dispatch({ type: 'START_LOAD' });
+    // Cancel any previous in-flight profile discovery or pagination request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    if (loadMoreAbortControllerRef.current) {
+      loadMoreAbortControllerRef.current.abort();
+      loadMoreAbortControllerRef.current = null;
+    }
+
+    const currentRequestId = ++requestIdRef.current;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     let username = urlOrUsername.trim();
     if (username.includes('/')) {
       const parsed = parseInstagramUrl(username);
       if (parsed.valid && parsed.username) {
         username = parsed.username;
+      } else {
+        const parts = username.split('/').filter(Boolean);
+        username = parts.pop() || username;
       }
     }
     username = username.replace(/^@/, '');
+    const cleanUsername = username.toLowerCase();
+    activeUsernameRef.current = cleanUsername;
+
+    dispatch({ type: 'START_LOAD' });
 
     try {
-      const resp = await safeFetchJson<ProfileDiscoveryResult>('/api/profile/discover', {
+      const resp = await safeFetchJson<ProfileDiscoveryResult>(`${apiBaseUrl}/api/profile/discover`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: urlOrUsername })
+        body: JSON.stringify({ url: urlOrUsername }),
+        signal: controller.signal
       });
 
+      // Discard stale or cancelled responses
+      if (requestIdRef.current !== currentRequestId || controller.signal.aborted) {
+        return;
+      }
+
       if (resp.ok && resp.data.ok) {
+        const returnedUsername = (resp.data.profile.username || '').toLowerCase();
+        // Identity validation: Ensure returned profile matches originally requested username
+        if (cleanUsername && returnedUsername && returnedUsername !== cleanUsername) {
+          dispatch({
+            type: 'LOAD_ERROR',
+            payload: {
+              code: 'PROFILE_MISMATCH',
+              message: `Requested profile @${cleanUsername} but received data for @${returnedUsername}. Discovery rejected for profile integrity.`
+            }
+          });
+          return;
+        }
+
         dispatch({
           type: 'LOAD_SUCCESS',
           payload: {
@@ -236,7 +281,7 @@ export const ProfileGalleryProvider: React.FC<{ children: React.ReactNode }> = (
         return;
       }
 
-      // If backend returned structured error
+      // If backend returned structured error inside successful HTTP response
       if (resp.ok && !resp.data.ok) {
         dispatch({
           type: 'LOAD_ERROR',
@@ -249,82 +294,141 @@ export const ProfileGalleryProvider: React.FC<{ children: React.ReactNode }> = (
         return;
       }
 
-      // If network / HTTP 404 / 502 error, check if client mock should take over for offline/demo
+      // If network / HTTP non-2xx error (e.g. 429, 403, 502)
       if (!resp.ok) {
-        // Attempt client mock fallback for demo mode
-        const mockResult = await discoverProfileClientMock(username);
-        if (mockResult.ok) {
+        if (isDemoMode) {
+          // Attempt client mock fallback ONLY when demo mode is explicitly enabled
+          const mockResult = await discoverProfileClientMock(username);
+          if (requestIdRef.current !== currentRequestId || controller.signal.aborted) {
+            return;
+          }
+          if (mockResult.ok) {
+            dispatch({
+              type: 'LOAD_SUCCESS',
+              payload: {
+                profile: mockResult.profile,
+                items: mockResult.items,
+                pagination: mockResult.pagination
+              }
+            });
+            return;
+          }
+
           dispatch({
-            type: 'LOAD_SUCCESS',
+            type: 'LOAD_ERROR',
             payload: {
-              profile: mockResult.profile,
-              items: mockResult.items,
-              pagination: mockResult.pagination
+              code: mockResult.error.code || resp.error.code,
+              message: mockResult.error.message || resp.error.message,
+              retryAfterSeconds: mockResult.error.retryAfterSeconds
             }
           });
           return;
         }
 
+        // Production mode: Surface genuine upstream error honestly
         dispatch({
           type: 'LOAD_ERROR',
           payload: {
-            code: mockResult.error.code || resp.error.code,
-            message: mockResult.error.message || resp.error.message,
-            retryAfterSeconds: mockResult.error.retryAfterSeconds
+            code: resp.error.code,
+            message: resp.error.message,
+            retryAfterSeconds: resp.status === 429 ? 60 : undefined
           }
         });
         return;
       }
-    } catch {
-      // Offline fallback
-      try {
-        const mockResult = await discoverProfileClientMock(username);
-        if (mockResult.ok) {
+    } catch (err: unknown) {
+      if (requestIdRef.current !== currentRequestId || controller.signal.aborted) {
+        return;
+      }
+
+      if ((err instanceof DOMException && err.name === 'AbortError') || (err as { name?: string })?.name === 'AbortError') {
+        return;
+      }
+
+      if (isDemoMode) {
+        // Offline demo fallback
+        try {
+          const mockResult = await discoverProfileClientMock(username);
+          if (requestIdRef.current !== currentRequestId || controller.signal.aborted) {
+            return;
+          }
+          if (mockResult.ok) {
+            dispatch({
+              type: 'LOAD_SUCCESS',
+              payload: {
+                profile: mockResult.profile,
+                items: mockResult.items,
+                pagination: mockResult.pagination
+              }
+            });
+            return;
+          }
           dispatch({
-            type: 'LOAD_SUCCESS',
+            type: 'LOAD_ERROR',
             payload: {
-              profile: mockResult.profile,
-              items: mockResult.items,
-              pagination: mockResult.pagination
+              code: mockResult.error.code,
+              message: mockResult.error.message
             }
           });
-          return;
+        } catch (innerErr: unknown) {
+          if (requestIdRef.current === currentRequestId && !controller.signal.aborted) {
+            dispatch({
+              type: 'LOAD_ERROR',
+              payload: {
+                code: 'NETWORK_ERROR',
+                message: innerErr instanceof Error ? innerErr.message : 'Unable to connect to service'
+              }
+            });
+          }
         }
-        dispatch({
-          type: 'LOAD_ERROR',
-          payload: {
-            code: mockResult.error.code,
-            message: mockResult.error.message
-          }
-        });
-      } catch (err: unknown) {
-        dispatch({
-          type: 'LOAD_ERROR',
-          payload: {
-            code: 'NETWORK_ERROR',
-            message: err instanceof Error ? err.message : 'Unable to connect to service'
-          }
-        });
+        return;
+      }
+
+      // Production mode: Honest network error
+      dispatch({
+        type: 'LOAD_ERROR',
+        payload: {
+          code: 'NETWORK_ERROR',
+          message: err instanceof Error ? err.message : 'Unable to connect to service'
+        }
+      });
+    } finally {
+      if (requestIdRef.current === currentRequestId) {
+        abortControllerRef.current = null;
       }
     }
-  }, []);
+  }, [apiBaseUrl, isDemoMode]);
 
   const loadMore = useCallback(async () => {
     if (state.isLoadingMore || !state.pagination.hasMore || !state.profile || state.items.length >= MAX_PROFILE_ITEMS) {
       return;
     }
 
+    if (loadMoreAbortControllerRef.current) {
+      loadMoreAbortControllerRef.current.abort();
+      loadMoreAbortControllerRef.current = null;
+    }
+
+    const currentRequestId = requestIdRef.current;
+    const controller = new AbortController();
+    loadMoreAbortControllerRef.current = controller;
+
     dispatch({ type: 'START_LOAD_MORE' });
 
     try {
-      const resp = await safeFetchJson<ProfileDiscoveryResult>('/api/profile/discover', {
+      const resp = await safeFetchJson<ProfileDiscoveryResult>(`${apiBaseUrl}/api/profile/discover`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           url: state.profile.username,
           cursor: state.pagination.nextCursor
-        })
+        }),
+        signal: controller.signal
       });
+
+      if (requestIdRef.current !== currentRequestId || controller.signal.aborted) {
+        return;
+      }
 
       if (resp.ok && resp.data.ok) {
         dispatch({
@@ -337,34 +441,67 @@ export const ProfileGalleryProvider: React.FC<{ children: React.ReactNode }> = (
         return;
       }
 
-      // Offline / Demo fallback for cursor
-      const mockResult = await discoverProfileClientMock(
-        state.profile.username,
-        state.pagination.nextCursor
-      );
-      if (mockResult.ok) {
-        dispatch({
-          type: 'LOAD_MORE_SUCCESS',
-          payload: {
-            items: mockResult.items,
-            pagination: mockResult.pagination
-          }
-        });
-      } else {
-        dispatch({
-          type: 'LOAD_MORE_ERROR',
-          payload: { message: mockResult.error.message }
-        });
+      // If in demo mode, allow mock pagination
+      if (isDemoMode) {
+        const mockResult = await discoverProfileClientMock(
+          state.profile.username,
+          state.pagination.nextCursor
+        );
+        if (requestIdRef.current !== currentRequestId || controller.signal.aborted) {
+          return;
+        }
+        if (mockResult.ok) {
+          dispatch({
+            type: 'LOAD_MORE_SUCCESS',
+            payload: {
+              items: mockResult.items,
+              pagination: mockResult.pagination
+            }
+          });
+        } else {
+          dispatch({
+            type: 'LOAD_MORE_ERROR',
+            payload: { message: mockResult.error.message }
+          });
+        }
+        return;
       }
-    } catch {
+
+      // Production mode: Surface honest error message
+      const errMsg = resp.ok
+        ? (!resp.data.ok ? resp.data.error.message : 'Failed to load additional items')
+        : resp.error.message;
       dispatch({
         type: 'LOAD_MORE_ERROR',
-        payload: { message: 'Failed to load additional items' }
+        payload: { message: errMsg || 'Failed to load additional items' }
       });
+    } catch (err: unknown) {
+      if (requestIdRef.current !== currentRequestId || controller.signal.aborted) {
+        return;
+      }
+      if ((err instanceof DOMException && err.name === 'AbortError') || (err as { name?: string })?.name === 'AbortError') {
+        return;
+      }
+      dispatch({
+        type: 'LOAD_MORE_ERROR',
+        payload: { message: err instanceof Error ? err.message : 'Failed to load additional items' }
+      });
+    } finally {
+      loadMoreAbortControllerRef.current = null;
     }
-  }, [state.isLoadingMore, state.pagination, state.profile]);
+  }, [state.isLoadingMore, state.pagination, state.profile, state.items.length, apiBaseUrl, isDemoMode]);
 
   const closeGallery = useCallback(() => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    if (loadMoreAbortControllerRef.current) {
+      loadMoreAbortControllerRef.current.abort();
+      loadMoreAbortControllerRef.current = null;
+    }
+    requestIdRef.current++;
+    activeUsernameRef.current = '';
     dispatch({ type: 'CLOSE_GALLERY' });
   }, []);
 

@@ -371,6 +371,7 @@ export class MockProvider implements IMediaProvider {
       provider: this.name,
       profile: {
         username: cleanUsername,
+        profileUrl: `https://www.instagram.com/${cleanUsername}/`,
         fullName: `${cleanUsername.charAt(0).toUpperCase() + cleanUsername.slice(1)} Studio`,
         biography: `Design, photography & visual storytelling. Curated gallery demo for Snapora v0.3.0.`,
         avatarUrl: `https://picsum.photos/seed/${cleanUsername}_avatar/300/300`,
