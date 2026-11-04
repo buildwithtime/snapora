@@ -6,7 +6,9 @@ import { parseInstagramUrl } from '../utils/urlValidator.js';
 
 export const UrlInputSection: React.FC = () => {
   const { addUrls, userAccessToken, setUserAccessToken, state } = useQueue();
-  const { loadProfile } = useProfileGallery();
+  const { loadProfile, state: profileGalleryState } = useProfileGallery();
+  const isSubmittingRef = useRef<boolean>(false);
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [inputText, setInputText] = useState('');
   const [isFocused, setIsFocused] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -14,6 +16,32 @@ export const UrlInputSection: React.FC = () => {
   const [recentList, setRecentList] = useState<RecentDownloadItem[]>([]);
   const [feedback, setFeedback] = useState<{ message: string; type: 'success' | 'warn' | 'error' } | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Extract candidate profile username from input if present
+  const candidateProfileUsername = React.useMemo(() => {
+    if (!inputText.trim()) return null;
+    const lines = inputText
+      .split(/(?:\r?\n|,|\s)+/)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0);
+    for (const line of lines) {
+      const parsed = parseInstagramUrl(line);
+      if (parsed.valid && parsed.mediaType === 'profile' && parsed.username) {
+        return parsed.username.toLowerCase();
+      }
+    }
+    return null;
+  }, [inputText]);
+
+  // Check if profile discovery is currently active for the same profile
+  const isSameProfileLoading = Boolean(
+    profileGalleryState.isLoading &&
+      (!candidateProfileUsername ||
+        candidateProfileUsername === profileGalleryState.targetUsername ||
+        candidateProfileUsername === profileGalleryState.profile?.username)
+  );
+
+  const isButtonDisabled = !inputText.trim() || isSubmitting || isSameProfileLoading;
 
   // Auto-expand textarea naturally as lines are added
   useEffect(() => {
@@ -56,82 +84,94 @@ export const UrlInputSection: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputText.trim()) return;
-
-    const lines = inputText
-      .split(/(?:\r?\n|,|\s)+/)
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-
-    // Separate profile URLs from media post/reel URLs
-    const profileLines: string[] = [];
-    const mediaLines: string[] = [];
-
-    for (const line of lines) {
-      const parsed = parseInstagramUrl(line);
-      if (parsed.valid && parsed.mediaType === 'profile') {
-        profileLines.push(line);
-      } else {
-        mediaLines.push(line);
-      }
-    }
-
-    if (profileLines.length > 0 && mediaLines.length === 0) {
-      const firstParsed = parseInstagramUrl(profileLines[0]);
-      loadProfile(profileLines[0]);
-      setFeedback({
-        message: `Discovered Instagram profile @${firstParsed.username || 'creator'}. Opening media gallery...`,
-        type: 'success'
-      });
-      setInputText('');
-      setTimeout(() => {
-        setFeedback(null);
-      }, 4500);
+    if (!inputText.trim() || isSubmittingRef.current || isSameProfileLoading) {
       return;
     }
 
-    if (profileLines.length > 0) {
-      loadProfile(profileLines[0]);
-    }
+    // Set lock synchronously before initiating asynchronous operations
+    isSubmittingRef.current = true;
+    setIsSubmitting(true);
 
-    // Only non-profile lines enter the download queue
-    const result = addUrls(mediaLines.join('\n'));
+    try {
+      const lines = inputText
+        .split(/(?:\r?\n|,|\s)+/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0);
 
-    if (result.addedCount > 0) {
-      const parts = [`Added ${result.addedCount} URL${result.addedCount > 1 ? 's' : ''} to queue`];
+      // Separate profile URLs from media post/reel URLs
+      const profileLines: string[] = [];
+      const mediaLines: string[] = [];
+
+      for (const line of lines) {
+        const parsed = parseInstagramUrl(line);
+        if (parsed.valid && parsed.mediaType === 'profile') {
+          profileLines.push(line);
+        } else {
+          mediaLines.push(line);
+        }
+      }
+
+      if (profileLines.length > 0 && mediaLines.length === 0) {
+        const firstParsed = parseInstagramUrl(profileLines[0]);
+        loadProfile(profileLines[0]);
+        setFeedback({
+          message: `Discovered Instagram profile @${firstParsed.username || 'creator'}. Opening media gallery...`,
+          type: 'success'
+        });
+        setInputText('');
+        setTimeout(() => {
+          setFeedback(null);
+        }, 4500);
+        return;
+      }
+
       if (profileLines.length > 0) {
-        parts.push(`(and opened profile gallery)`);
+        loadProfile(profileLines[0]);
       }
-      if (result.duplicateCount > 0) {
-        parts.push(`(${result.duplicateCount} duplicate${result.duplicateCount > 1 ? 's' : ''} skipped)`);
-      }
-      if (result.invalidCount > 0) {
-        parts.push(`(${result.invalidCount} invalid skipped)`);
-      }
-      setFeedback({ message: parts.join(' '), type: 'success' });
-      setInputText('');
-    } else if (result.duplicateCount > 0) {
-      setFeedback({
-        message: `All ${result.duplicateCount} URL${result.duplicateCount > 1 ? 's' : ''} are already in queue`,
-        type: 'warn'
-      });
-      setInputText('');
-    } else if (profileLines.length > 0) {
-      setFeedback({
-        message: 'Opened Instagram profile media gallery.',
-        type: 'success'
-      });
-      setInputText('');
-    } else if (result.invalidCount > 0) {
-      setFeedback({
-        message: 'No valid Instagram URLs recognized. Expected format: instagram.com/p/..., /reel/..., or /username/',
-        type: 'error'
-      });
-    }
 
-    setTimeout(() => {
-      setFeedback(null);
-    }, 4500);
+      // Only non-profile lines enter the download queue
+      const result = addUrls(mediaLines.join('\n'));
+
+      if (result.addedCount > 0) {
+        const parts = [`Added ${result.addedCount} URL${result.addedCount > 1 ? 's' : ''} to queue`];
+        if (profileLines.length > 0) {
+          parts.push(`(and opened profile gallery)`);
+        }
+        if (result.duplicateCount > 0) {
+          parts.push(`(${result.duplicateCount} duplicate${result.duplicateCount > 1 ? 's' : ''} skipped)`);
+        }
+        if (result.invalidCount > 0) {
+          parts.push(`(${result.invalidCount} invalid skipped)`);
+        }
+        setFeedback({ message: parts.join(' '), type: 'success' });
+        setInputText('');
+      } else if (result.duplicateCount > 0) {
+        setFeedback({
+          message: `All ${result.duplicateCount} URL${result.duplicateCount > 1 ? 's' : ''} are already in queue`,
+          type: 'warn'
+        });
+        setInputText('');
+      } else if (profileLines.length > 0) {
+        setFeedback({
+          message: 'Opened Instagram profile media gallery.',
+          type: 'success'
+        });
+        setInputText('');
+      } else if (result.invalidCount > 0) {
+        setFeedback({
+          message: 'No valid Instagram URLs recognized. Expected format: instagram.com/p/..., /reel/..., or /username/',
+          type: 'error'
+        });
+      }
+
+      setTimeout(() => {
+        setFeedback(null);
+      }, 4500);
+    } finally {
+      // Release lock synchronously in finally block after submission processing finishes
+      isSubmittingRef.current = false;
+      setIsSubmitting(false);
+    }
   };
 
   const handlePasteRecent = (url: string) => {
@@ -352,7 +392,7 @@ export const UrlInputSection: React.FC = () => {
           <button
             type="submit"
             id="fetch-media-btn"
-            disabled={!inputText.trim()}
+            disabled={isButtonDisabled}
             className="btn btn-primary"
             style={{
               fontWeight: 700,
@@ -360,7 +400,9 @@ export const UrlInputSection: React.FC = () => {
               fontSize: '0.94rem',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.5rem'
+              gap: '0.5rem',
+              opacity: isButtonDisabled ? 0.6 : 1,
+              cursor: isButtonDisabled ? 'not-allowed' : 'pointer'
             }}
           >
             <span>Fetch Media</span>

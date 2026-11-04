@@ -120,6 +120,53 @@ describe('safeFetchJson API Client Suite', () => {
     }
   });
 
+  it('extracts retryAfterSeconds and x-ratelimit-source from response headers on 429', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: new Headers({
+        'retry-after': '45',
+        'x-ratelimit-source': 'upstream'
+      }),
+      text: () => Promise.resolve(JSON.stringify({
+        ok: false,
+        error: {
+          code: 'UPSTREAM_RATE_LIMITED',
+          message: 'Instagram is temporarily limiting requests. Please try again in 45 seconds.',
+          retryAfterSeconds: 45
+        }
+      }))
+    });
+
+    const result = await safeFetchJson('/api/test');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('UPSTREAM_RATE_LIMITED');
+      expect(result.error.retryAfterSeconds).toBe(45);
+      expect(result.error.rateLimitSource).toBe('upstream');
+    }
+  });
+
+  it('identifies snapora local rate limits with LOCAL_RATE_LIMITED and header source', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      headers: new Headers({
+        'retry-after': '30',
+        'x-ratelimit-source': 'snapora'
+      }),
+      text: () => Promise.resolve('')
+    });
+
+    const result = await safeFetchJson('/api/test');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe('LOCAL_RATE_LIMITED');
+      expect(result.error.retryAfterSeconds).toBe(30);
+      expect(result.error.rateLimitSource).toBe('snapora');
+    }
+  });
+
   it('re-throws AbortError for user cancellation', async () => {
     const abortError = new DOMException('The user aborted a request.', 'AbortError');
     global.fetch = vi.fn().mockRejectedValue(abortError);

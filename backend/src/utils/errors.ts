@@ -10,6 +10,8 @@ export type ErrorCode =
   | 'UNSUPPORTED_URL'
   | 'INVALID_URL'
   | 'RATE_LIMITED'
+  | 'UPSTREAM_RATE_LIMITED'
+  | 'LOCAL_RATE_LIMITED'
   | 'PROVIDER_ERROR'
   | 'TIMEOUT'
   | 'NETWORK_ERROR'
@@ -103,13 +105,21 @@ export function parseRetryAfter(
  * Generates an informative, user-friendly rate-limit message incorporating
  * parsed retry-after durations where available.
  */
-export function formatRateLimitMessage(retryAfterSeconds: number | null): string {
+export function formatRateLimitMessage(
+  retryAfterSeconds: number | null,
+  source: 'upstream' | 'snapora' = 'upstream'
+): string {
+  const prefix =
+    source === 'snapora'
+      ? 'Snapora request limit reached'
+      : 'Instagram is temporarily limiting requests';
+
   if (retryAfterSeconds !== null && retryAfterSeconds > 0) {
     if (retryAfterSeconds < 60) {
-      return `Instagram is temporarily limiting requests. Please try again in ${retryAfterSeconds} second${retryAfterSeconds === 1 ? '' : 's'}.`;
+      return `${prefix}. Please try again in ${retryAfterSeconds} second${retryAfterSeconds === 1 ? '' : 's'}.`;
     }
     const minutes = Math.ceil(retryAfterSeconds / 60);
-    return `Instagram is temporarily limiting requests. Please try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`;
+    return `${prefix}. Please try again in ${minutes} minute${minutes === 1 ? '' : 's'}.`;
   }
-  return 'Instagram is temporarily limiting requests. Please try again later.';
+  return `${prefix}. Please try again later.`;
 }

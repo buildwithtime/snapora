@@ -170,6 +170,7 @@ export interface ProfileDiscoveryOptions {
   cursor?: string;
   userAccessToken?: string;
   limit?: number;
+  signal?: AbortSignal;
 }
 
 export interface ProviderCapabilities {
@@ -184,6 +185,7 @@ export interface ProviderCapabilities {
 
 export interface ResolveOptions {
   userAccessToken?: string;
+  signal?: AbortSignal;
 }
 
 export interface IMediaProvider {

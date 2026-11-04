@@ -38,6 +38,12 @@ interface QueueContextType {
   cancelDownloadAll: () => void;
 }
 
+const rawPacing = (import.meta as any).env?.VITE_QUEUE_PACING_MS;
+const parsedPacing = rawPacing !== undefined && rawPacing !== '' ? parseInt(rawPacing, 10) : NaN;
+const queuePacingMs = !isNaN(parsedPacing) && parsedPacing >= 0
+  ? parsedPacing
+  : ((import.meta as any).env?.MODE === 'test' ? 0 : 150);
+
 const QueueContext = createContext<QueueContextType | undefined>(undefined);
 
 export function queueReducer(state: QueueState, action: QueueAction): QueueState {
@@ -138,7 +144,13 @@ export function queueReducer(state: QueueState, action: QueueAction): QueueState
                 completedAt: Date.now(),
                 error: {
                   code: action.payload.code,
-                  message: action.payload.message
+                  message: action.payload.message,
+                  ...(action.payload.retryAfterSeconds
+                    ? { retryAfterSeconds: action.payload.retryAfterSeconds }
+                    : {}),
+                  ...(action.payload.rateLimitSource
+                    ? { rateLimitSource: action.payload.rateLimitSource }
+                    : {})
                 }
               }
             : job
@@ -152,12 +164,59 @@ export function queueReducer(state: QueueState, action: QueueAction): QueueState
       };
 
     case 'RESUME_QUEUE':
+      if (state.upstreamCooldownRemaining && state.upstreamCooldownRemaining > 0) {
+        return state;
+      }
       return {
         ...state,
         isPaused: false
       };
 
+    case 'TRIGGER_COOLDOWN': {
+      const seconds = Math.max(1, action.payload.seconds);
+      const until = Date.now() + seconds * 1000;
+      return {
+        ...state,
+        isPaused: true,
+        upstreamCooldownUntil: until,
+        upstreamCooldownRemaining: seconds,
+        upstreamRateLimitSource: action.payload.source || 'upstream'
+      };
+    }
+
+    case 'TICK_COOLDOWN': {
+      if (!state.upstreamCooldownUntil) {
+        return state;
+      }
+      const remaining = Math.max(0, Math.ceil((state.upstreamCooldownUntil - Date.now()) / 1000));
+      if (remaining <= 0) {
+        return {
+          ...state,
+          isPaused: false,
+          upstreamCooldownUntil: null,
+          upstreamCooldownRemaining: null,
+          upstreamRateLimitSource: null
+        };
+      }
+      return {
+        ...state,
+        upstreamCooldownRemaining: remaining
+      };
+    }
+
+    case 'CLEAR_COOLDOWN':
+      return {
+        ...state,
+        isPaused: false,
+        upstreamCooldownUntil: null,
+        upstreamCooldownRemaining: null,
+        upstreamRateLimitSource: null
+      };
+
     case 'RETRY_JOB':
+      if (state.upstreamCooldownRemaining && state.upstreamCooldownRemaining > 0) {
+        return state;
+      }
       return {
         ...state,
         jobs: state.jobs.map((job) =>
@@ -318,8 +377,22 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [state, dispatch] = useReducer(queueReducer, {
     jobs: [],
     isPaused: false,
-    activeJobId: null
+    activeJobId: null,
+    upstreamCooldownUntil: null,
+    upstreamCooldownRemaining: null,
+    upstreamRateLimitSource: null
   });
+
+  // Live Cooldown countdown timer
+  useEffect(() => {
+    if (!state.upstreamCooldownUntil) return;
+
+    const interval = setInterval(() => {
+      dispatch({ type: 'TICK_COOLDOWN' });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [state.upstreamCooldownUntil]);
 
   const [downloadMode, setDownloadMode] = useState<DownloadMode>('individual');
 
@@ -346,6 +419,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const processingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const lastRequestTimeRef = useRef<number>(0);
 
   const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/, '');
   const isDemoMode = import.meta.env.VITE_DEMO_MODE === 'true';
@@ -374,7 +448,13 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Queue runner: strictly sequential processing (concurrency = 1)
   useEffect(() => {
-    if (state.isPaused || processingRef.current) {
+    if (
+      state.isPaused ||
+      processingRef.current ||
+      (state.upstreamCooldownRemaining !== null &&
+        state.upstreamCooldownRemaining !== undefined &&
+        state.upstreamCooldownRemaining > 0)
+    ) {
       return;
     }
 
@@ -391,6 +471,24 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     (async () => {
       try {
+        if (queuePacingMs > 0 && lastRequestTimeRef.current > 0) {
+          const elapsed = Date.now() - lastRequestTimeRef.current;
+          const waitTime = queuePacingMs - elapsed;
+          if (waitTime > 0) {
+            await new Promise<void>((resolve, reject) => {
+              const timer = setTimeout(resolve, waitTime);
+              const onAbort = () => {
+                clearTimeout(timer);
+                reject(new DOMException('Aborted', 'AbortError'));
+              };
+              controller.signal.addEventListener('abort', onAbort, { once: true });
+            });
+          }
+        }
+
+        if (controller.signal.aborted) {
+          return;
+        }
         if (isDemoMode) {
           // Client-side standalone demo resolution
           const mockResult = await resolveClientMock(nextJob.shortcode);
@@ -470,15 +568,38 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         });
 
         if (!apiResult.ok) {
+          const isRateLimited =
+            apiResult.error.code === 'UPSTREAM_RATE_LIMITED' ||
+            apiResult.error.code === 'RATE_LIMITED' ||
+            apiResult.error.code === 'LOCAL_RATE_LIMITED' ||
+            apiResult.status === 429;
+
+          const retrySec = apiResult.error.retryAfterSeconds || 60;
+          const source =
+            apiResult.error.rateLimitSource ||
+            (apiResult.error.code === 'LOCAL_RATE_LIMITED' ? 'snapora' : 'upstream');
+
           dispatch({
             type: 'JOB_FAILURE',
             payload: {
               jobId: nextJob.id,
               code: apiResult.error.code,
               message: apiResult.error.message,
-              resolutionStatus: 'provider_error'
+              resolutionStatus: isRateLimited ? 'rate_limited' : 'provider_error',
+              retryAfterSeconds: isRateLimited ? retrySec : undefined,
+              rateLimitSource: isRateLimited ? source : undefined
             }
           });
+
+          if (isRateLimited) {
+            dispatch({
+              type: 'TRIGGER_COOLDOWN',
+              payload: {
+                seconds: retrySec,
+                source
+              }
+            });
+          }
           return;
         }
 
@@ -516,15 +637,36 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             }
           });
         } else {
+          const isRateLimited =
+            data.error?.code === 'UPSTREAM_RATE_LIMITED' ||
+            data.error?.code === 'RATE_LIMITED' ||
+            data.error?.code === 'LOCAL_RATE_LIMITED' ||
+            data.status === 'rate_limited';
+
+          const retrySec = (data.error as any)?.retryAfterSeconds || 60;
+          const source = data.error?.code === 'LOCAL_RATE_LIMITED' ? 'snapora' : 'upstream';
+
           dispatch({
             type: 'JOB_FAILURE',
             payload: {
               jobId: nextJob.id,
               code: data.error?.code || 'FETCH_ERROR',
               message: data.error?.message || 'Failed to resolve media from upstream endpoint',
-              resolutionStatus: data.status || 'provider_error'
+              resolutionStatus: data.status || (isRateLimited ? 'rate_limited' : 'provider_error'),
+              retryAfterSeconds: isRateLimited ? retrySec : undefined,
+              rateLimitSource: isRateLimited ? source : undefined
             }
           });
+
+          if (isRateLimited) {
+            dispatch({
+              type: 'TRIGGER_COOLDOWN',
+              payload: {
+                seconds: retrySec,
+                source
+              }
+            });
+          }
         }
       } catch (err: unknown) {
         if ((err instanceof DOMException && err.name === 'AbortError') || (err as { name?: string })?.name === 'AbortError') {
@@ -543,11 +685,20 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
         });
       } finally {
+        lastRequestTimeRef.current = Date.now();
         processingRef.current = false;
         abortControllerRef.current = null;
       }
     })();
-  }, [state.jobs, state.isPaused, state.activeJobId, apiBaseUrl, isDemoMode, userAccessToken]);
+  }, [
+    state.jobs,
+    state.isPaused,
+    state.activeJobId,
+    state.upstreamCooldownRemaining,
+    apiBaseUrl,
+    isDemoMode,
+    userAccessToken
+  ]);
 
   const addUrls = (rawText: string) => {
     const { valid, invalid } = parseBatchUrls(rawText);

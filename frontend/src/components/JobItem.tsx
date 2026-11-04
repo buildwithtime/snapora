@@ -8,7 +8,10 @@ interface JobItemProps {
 }
 
 export const JobItem: React.FC<JobItemProps> = ({ job }) => {
-  const { retryJob, removeJob } = useQueue();
+  const { state, retryJob, removeJob } = useQueue();
+  const isCoolingDown = Boolean(
+    state.upstreamCooldownRemaining && state.upstreamCooldownRemaining > 0
+  );
 
   const getStatusBadge = () => {
     switch (job.status) {
@@ -229,10 +232,21 @@ export const JobItem: React.FC<JobItemProps> = ({ job }) => {
             <button
               type="button"
               onClick={() => retryJob(job.id)}
+              disabled={isCoolingDown}
               className="btn btn-secondary btn-sm"
-              style={{ fontSize: '0.75rem', padding: '0.3rem 0.65rem' }}
+              style={{
+                fontSize: '0.75rem',
+                padding: '0.3rem 0.65rem',
+                opacity: isCoolingDown ? 0.6 : 1,
+                cursor: isCoolingDown ? 'not-allowed' : 'pointer'
+              }}
+              title={
+                isCoolingDown
+                  ? `Cooldown active (${state.upstreamCooldownRemaining}s remaining). Retry will be available shortly.`
+                  : 'Retry this job'
+              }
             >
-              🔄 Retry
+              {isCoolingDown ? `⏳ Wait (${state.upstreamCooldownRemaining}s)` : '🔄 Retry'}
             </button>
           )}
           <button
@@ -264,9 +278,15 @@ export const JobItem: React.FC<JobItemProps> = ({ job }) => {
               };
             case 'HTTP_429_RATE_LIMITED':
             case 'RATE_LIMITED':
+            case 'UPSTREAM_RATE_LIMITED':
               return {
                 title: 'Temporarily Rate Limited',
-                detail: err.message || 'Instagram is temporarily limiting requests. Please try again later.'
+                detail: err.message || 'Instagram is temporarily limiting requests. Please wait for cooldown before retrying.'
+              };
+            case 'LOCAL_RATE_LIMITED':
+              return {
+                title: 'Snapora Request Limit Reached',
+                detail: err.message || 'Snapora request limit reached. Please try again later.'
               };
             case 'TIMEOUT':
               return {

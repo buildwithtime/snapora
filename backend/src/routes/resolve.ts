@@ -72,7 +72,10 @@ export async function resolveRoutes(app: FastifyInstance, options?: { provider?:
               ? 404
               : result.error.code === 'EXPIRED_MEDIA_URL' || result.error.code === 'MEDIA_URL_EXPIRED'
               ? 410
-              : result.error.code === 'RATE_LIMITED' || result.error.code === 'HTTP_429_RATE_LIMITED'
+              : result.error.code === 'RATE_LIMITED' ||
+                result.error.code === 'HTTP_429_RATE_LIMITED' ||
+                result.error.code === 'UPSTREAM_RATE_LIMITED' ||
+                result.error.code === 'LOCAL_RATE_LIMITED'
               ? 429
               : result.error.code === 'PAGE_FETCH_FAILED' || result.error.code === 'CDN_REQUEST_FAILED' || result.error.code === 'STREAM_INTERRUPTED'
               ? 502
@@ -86,8 +89,12 @@ export async function resolveRoutes(app: FastifyInstance, options?: { provider?:
               ? 422
               : 502;
 
-          if (status === 429 && result.error.retryAfterSeconds && result.error.retryAfterSeconds > 0) {
-            reply.header('Retry-After', result.error.retryAfterSeconds.toString());
+          if (status === 429) {
+            const isLocal = result.error.code === 'LOCAL_RATE_LIMITED';
+            reply.header('X-RateLimit-Source', isLocal ? 'snapora' : 'upstream');
+            if (result.error.retryAfterSeconds && result.error.retryAfterSeconds > 0) {
+              reply.header('Retry-After', result.error.retryAfterSeconds.toString());
+            }
           }
 
           return reply.status(status).send(result);

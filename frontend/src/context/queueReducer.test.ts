@@ -518,4 +518,98 @@ describe('Queue State Machine Transitions', () => {
       expect(retriedAgain.jobs[0].retryCount).toBe(3);
     });
   });
+
+  describe('Rate-Limit Cooldown Transitions', () => {
+    it('TRIGGER_COOLDOWN pauses queue and records upstream cooldown', () => {
+      const state: QueueState = {
+        jobs: [
+          {
+            id: 'job_1',
+            url: 'https://instagram.com/p/1/',
+            normalizedUrl: 'https://www.instagram.com/p/1/',
+            shortcode: '1',
+            status: 'failed',
+            createdAt: 100,
+            retryCount: 0
+          }
+        ],
+        isPaused: false,
+        activeJobId: null
+      };
+
+      const cooldownState = queueReducer(state, {
+        type: 'TRIGGER_COOLDOWN',
+        payload: { seconds: 45, source: 'upstream' }
+      });
+
+      expect(cooldownState.isPaused).toBe(true);
+      expect(cooldownState.upstreamCooldownRemaining).toBe(45);
+      expect(cooldownState.upstreamRateLimitSource).toBe('upstream');
+      expect(cooldownState.upstreamCooldownUntil).toBeGreaterThan(Date.now());
+    });
+
+    it('blocks RESUME_QUEUE and RETRY_JOB during active cooldown', () => {
+      const cooldownState: QueueState = {
+        jobs: [
+          {
+            id: 'job_1',
+            url: 'https://instagram.com/p/1/',
+            normalizedUrl: 'https://www.instagram.com/p/1/',
+            shortcode: '1',
+            status: 'failed',
+            createdAt: 100,
+            retryCount: 0
+          }
+        ],
+        isPaused: true,
+        activeJobId: null,
+        upstreamCooldownUntil: Date.now() + 60000,
+        upstreamCooldownRemaining: 60,
+        upstreamRateLimitSource: 'upstream'
+      };
+
+      // Resume attempt while cooling down
+      const resumedState = queueReducer(cooldownState, { type: 'RESUME_QUEUE' });
+      expect(resumedState.isPaused).toBe(true); // Still paused!
+
+      // Retry attempt while cooling down
+      const retriedState = queueReducer(cooldownState, {
+        type: 'RETRY_JOB',
+        payload: { jobId: 'job_1' }
+      });
+      expect(retriedState.jobs[0].status).toBe('failed'); // Not transitioned to queued!
+    });
+
+    it('clears cooldown and automatically unpauses queue when cooldown expires', () => {
+      const cooldownState: QueueState = {
+        jobs: [],
+        isPaused: true,
+        activeJobId: null,
+        upstreamCooldownUntil: Date.now() - 1000, // already expired in past
+        upstreamCooldownRemaining: 1,
+        upstreamRateLimitSource: 'upstream'
+      };
+
+      const ticked = queueReducer(cooldownState, { type: 'TICK_COOLDOWN' });
+      expect(ticked.upstreamCooldownUntil).toBeNull();
+      expect(ticked.upstreamCooldownRemaining).toBeNull();
+      expect(ticked.isPaused).toBe(false); // Automatically unpaused when cooldown expires
+    });
+
+    it('CLEAR_COOLDOWN unpauses queue and clears cooldown state', () => {
+      const cooldownState: QueueState = {
+        jobs: [],
+        isPaused: true,
+        activeJobId: null,
+        upstreamCooldownUntil: Date.now() + 60000,
+        upstreamCooldownRemaining: 60,
+        upstreamRateLimitSource: 'upstream'
+      };
+
+      const cleared = queueReducer(cooldownState, { type: 'CLEAR_COOLDOWN' });
+      expect(cleared.upstreamCooldownUntil).toBeNull();
+      expect(cleared.upstreamCooldownRemaining).toBeNull();
+      expect(cleared.isPaused).toBe(false);
+    });
+  });
 });

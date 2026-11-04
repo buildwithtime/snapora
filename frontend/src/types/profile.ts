@@ -75,6 +75,7 @@ export interface ProfileGalleryState {
   isLoading: boolean;
   isLoadingMore: boolean;
   profile: ProfileInfo | null;
+  targetUsername?: string;
   items: ProfileMediaItem[];
   pagination: ProfilePagination;
   selectedIds: Set<string>;
