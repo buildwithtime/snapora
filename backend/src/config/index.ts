@@ -14,6 +14,7 @@ export interface AppConfig {
   instagramOembedAccessToken?: string;
   instagramUserAccessToken?: string;
   instagramGraphApiVersion?: string;
+  adminApiKey?: string;
 }
 
 export const DEFAULT_PRODUCTION_ORIGIN = 'https://snapora-1r3i.onrender.com';
@@ -117,7 +118,8 @@ export const config: AppConfig = {
   instagramClientToken: process.env.INSTAGRAM_CLIENT_TOKEN?.trim() || undefined,
   instagramOembedAccessToken: process.env.INSTAGRAM_OEMBED_ACCESS_TOKEN?.trim() || undefined,
   instagramUserAccessToken: process.env.INSTAGRAM_USER_ACCESS_TOKEN?.trim() || undefined,
-  instagramGraphApiVersion: process.env.INSTAGRAM_GRAPH_API_VERSION?.trim() || 'v21.0'
+  instagramGraphApiVersion: process.env.INSTAGRAM_GRAPH_API_VERSION?.trim() || 'v21.0',
+  adminApiKey: process.env.ADMIN_API_KEY?.trim() || undefined
 };
 
 export interface ConfigValidationResult {
