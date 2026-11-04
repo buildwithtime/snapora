@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ClientRequestScheduler } from './requestScheduler.js';
+import { ClientRequestScheduler, StaleLockError } from './requestScheduler.js';
 
 describe('ClientRequestScheduler Unit & Multi-Tab Suite', () => {
   beforeEach(() => {
@@ -318,6 +318,62 @@ describe('ClientRequestScheduler Unit & Multi-Tab Suite', () => {
       } finally {
         (navigator as any).locks = originalLocks;
       }
+    });
+
+    it('fences out stale lock owners when localStorage lease expires during execution', async () => {
+      vi.useFakeTimers();
+      const storageKey = 'test_stale_fencing';
+      const lockKey = `snapora_lock_${storageKey}_lease`;
+
+      const scheduler = new ClientRequestScheduler({
+        syncStorageKey: storageKey,
+        leaseDurationMs: 200, // Short 200ms lease for test
+        minPacingMs: 0
+      });
+
+      let executedCriticalSection = false;
+      let caughtStaleError = false;
+
+      // Acquire lock and simulate delayed operation exceeding lease
+      const lockPromise = scheduler.withCrossTabLock(async (context) => {
+        expect(context.isValid()).toBe(true);
+
+        // Advance time past the 200ms lease duration
+        await vi.advanceTimersByTimeAsync(250);
+
+        // context.isValid() must now detect expiration
+        expect(context.isValid()).toBe(false);
+
+        // context.ensureValid() must throw StaleLockError
+        expect(() => context.ensureValid()).toThrow(StaleLockError);
+
+        try {
+          context.ensureValid();
+          executedCriticalSection = true;
+        } catch (err) {
+          if (err instanceof StaleLockError) {
+            caughtStaleError = true;
+          }
+          throw err;
+        }
+      });
+
+      await expect(lockPromise).rejects.toThrow(StaleLockError);
+      expect(caughtStaleError).toBe(true);
+      expect(executedCriticalSection).toBe(false);
+
+      // Verify stale owner did NOT delete a superseded lock in finally
+      // Simulate another tab acquiring the lock after expiration
+      const otherTabCandidate = JSON.stringify({
+        owner: 'tab_other_active',
+        expiresAt: Date.now() + 3000
+      });
+      window.localStorage.setItem(lockKey, otherTabCandidate);
+
+      // Now run another operation on the first scheduler: verify other tab's lock remains intact
+      expect(window.localStorage.getItem(lockKey)).toBe(otherTabCandidate);
+
+      vi.useRealTimers();
     });
   });
 });
