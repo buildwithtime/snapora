@@ -6,10 +6,12 @@
  * - Refill Interval: 2,000ms (1 token refilled every 2s = 30 tokens/minute steady state).
  * - Rolling Window Ceiling: 28 requests per 60,000ms (prevents burst exhaustion with safety margin).
  * - Multi-Tab Synchronization & Concurrency: Coordinates atomically across open tabs.
- *   Uses the Web Locks API (navigator.locks.request) where supported with graceful fallback
- *   to a lease-based localStorage mutex for older browsers / Node.js test environments.
- * - Stale Owner Fencing: Validates lease ownership before committing shared state mutations,
- *   halting lapsed lock holders with StaleLockError before they can execute or write.
+ *   Uses the W3C Web Locks API (navigator.locks.request) as the primary cross-tab mechanism.
+ * - Fenced Optimistic Concurrency Fallback: For environments without Web Locks, implements
+ *   a lease-based mutex with monotonic fencing tokens and optimistic concurrency versioning.
+ *   Mutations are committed exclusively via atomic commit methods that fail closed on any
+ *   lease expiration, fence token mismatch, or storage version conflict, eliminating TOCTOU
+ *   stale-owner overwrites.
  * - Abort-aware: Cleanly cancels sleep timers on pause, job cancellation, or component unmount.
  */
 
@@ -23,6 +25,7 @@ export class StaleLockError extends Error {
 export interface LockContext {
   isValid: () => boolean;
   ensureValid: () => void;
+  commitRecords: (records: RequestRecord[]) => void;
 }
 
 export interface RequestSchedulerConfig {
@@ -44,9 +47,17 @@ export interface SchedulerSnapshot {
   lockMechanism: 'web-locks' | 'localstorage-mutex' | 'none';
 }
 
-interface RequestRecord {
+export interface RequestRecord {
   id: string;
   timestamp: number;
+}
+
+export interface SharedStoragePayload {
+  version: number;
+  fenceToken: string;
+  owner: string;
+  updatedAt: number;
+  records: RequestRecord[];
 }
 
 export class ClientRequestScheduler {
@@ -66,6 +77,7 @@ export class ClientRequestScheduler {
   private activeReservations: string[];
   private cooldownUntil: number;
   private inTabQueue: Promise<void>;
+  private fenceCounter: number;
 
   constructor(config: RequestSchedulerConfig = {}) {
     this.bucketCapacity = config.bucketCapacity ?? 10;
@@ -84,6 +96,7 @@ export class ClientRequestScheduler {
     this.activeReservations = [];
     this.cooldownUntil = 0;
     this.inTabQueue = Promise.resolve();
+    this.fenceCounter = 0;
   }
 
   /**
@@ -107,7 +120,7 @@ export class ClientRequestScheduler {
    * Coordinates execution across browser tabs using the most appropriate lock.
    * Priority:
    * 1. Web Locks API (Chrome 69+, Edge 79+, Firefox 96+, Safari 15.4+)
-   * 2. Lease-based localStorage mutex with stale owner fencing
+   * 2. Fenced lease-based localStorage mutex with optimistic concurrency versioning
    * 3. Degraded / storage-disabled: direct execution
    */
   public async withCrossTabLock<T>(
@@ -126,7 +139,7 @@ export class ClientRequestScheduler {
 
       const lockName = `snapora_lock_${this.syncStorageKey}`;
 
-      // 1. Web Locks API
+      // 1. Web Locks API (authoritative browser-level mutual exclusion)
       if (
         typeof navigator !== 'undefined' &&
         (navigator as any).locks &&
@@ -143,6 +156,33 @@ export class ClientRequestScheduler {
                   if (signal?.aborted) {
                     throw new DOMException('Aborted', 'AbortError');
                   }
+                },
+                commitRecords: (records: RequestRecord[]) => {
+                  if (signal?.aborted) {
+                    throw new DOMException('Aborted', 'AbortError');
+                  }
+                  if (typeof window !== 'undefined' && window.localStorage) {
+                    try {
+                      const raw = window.localStorage.getItem(this.syncStorageKey);
+                      let version = 0;
+                      if (raw) {
+                        try {
+                          const parsed = JSON.parse(raw);
+                          if (parsed && typeof parsed.version === 'number') {
+                            version = parsed.version;
+                          }
+                        } catch {}
+                      }
+                      const payload: SharedStoragePayload = {
+                        version: version + 1,
+                        fenceToken: 'web-locks',
+                        owner: this.tabId,
+                        updatedAt: Date.now(),
+                        records
+                      };
+                      window.localStorage.setItem(this.syncStorageKey, JSON.stringify(payload));
+                    } catch {}
+                  }
                 }
               };
               return await action(context);
@@ -155,12 +195,14 @@ export class ClientRequestScheduler {
         }
       }
 
-      // 2. Lease-based localStorage mutex fallback with fencing
+      // 2. Fenced lease-based localStorage mutex fallback
       if (typeof window !== 'undefined' && window.localStorage) {
         const lockKey = `${lockName}_lease`;
         const startTime = Date.now();
         let lockAcquired = false;
         let leaseExpiresAt = 0;
+        let currentFenceToken = '';
+        let initialStorageVersion = 0;
 
         try {
           while (!lockAcquired) {
@@ -195,8 +237,11 @@ export class ClientRequestScheduler {
 
             if (canClaim) {
               leaseExpiresAt = now + this.leaseDurationMs;
+              this.fenceCounter++;
+              currentFenceToken = `${this.tabId}_${now}_${this.fenceCounter}`;
               const candidate = JSON.stringify({
                 owner: this.tabId,
+                fenceToken: currentFenceToken,
                 expiresAt: leaseExpiresAt
               });
               try {
@@ -215,7 +260,18 @@ export class ClientRequestScheduler {
             await this.delay(jitter, signal);
           }
 
-          // Build fencing lock context
+          // Capture baseline storage version upon lock acquisition
+          try {
+            const rawData = window.localStorage.getItem(this.syncStorageKey);
+            if (rawData) {
+              const parsed = JSON.parse(rawData);
+              if (parsed && typeof parsed.version === 'number') {
+                initialStorageVersion = parsed.version;
+              }
+            }
+          } catch {}
+
+          // Verification helper for current lease validity
           const isLockValid = (): boolean => {
             if (signal?.aborted) return false;
             if (typeof window === 'undefined' || !window.localStorage) return true;
@@ -228,6 +284,7 @@ export class ClientRequestScheduler {
               return (
                 parsed &&
                 parsed.owner === this.tabId &&
+                parsed.fenceToken === currentFenceToken &&
                 typeof parsed.expiresAt === 'number' &&
                 parsed.expiresAt > checkTime
               );
@@ -245,23 +302,72 @@ export class ClientRequestScheduler {
             }
           };
 
+          // Fenced commit method: eliminates TOCTOU races by verifying lease, fence token,
+          // and storage version immediately before persisting changes.
+          const commitRecords = (records: RequestRecord[]): void => {
+            if (signal?.aborted) {
+              throw new DOMException('Aborted', 'AbortError');
+            }
+
+            if (typeof window === 'undefined' || !window.localStorage) {
+              return;
+            }
+
+            // 1. Verify lease ownership, fence token, and non-expiration
+            if (!isLockValid()) {
+              throw new StaleLockError('Lock lease expired or was superseded before commit');
+            }
+
+            // 2. Optimistic Concurrency Control: verify storage version has not moved
+            const rawData = window.localStorage.getItem(this.syncStorageKey);
+            let currentVersion = 0;
+            if (rawData) {
+              try {
+                const parsed = JSON.parse(rawData);
+                if (parsed && typeof parsed.version === 'number') {
+                  currentVersion = parsed.version;
+                }
+              } catch {}
+            }
+
+            if (currentVersion !== initialStorageVersion) {
+              throw new StaleLockError(
+                `Optimistic concurrency conflict: storage version changed from ${initialStorageVersion} to ${currentVersion}`
+              );
+            }
+
+            const nextVersion = currentVersion + 1;
+            const payload: SharedStoragePayload = {
+              version: nextVersion,
+              fenceToken: currentFenceToken,
+              owner: this.tabId,
+              updatedAt: Date.now(),
+              records
+            };
+
+            window.localStorage.setItem(this.syncStorageKey, JSON.stringify(payload));
+            initialStorageVersion = nextVersion;
+          };
+
           const context: LockContext = {
             isValid: isLockValid,
-            ensureValid
+            ensureValid,
+            commitRecords
           };
 
           return await action(context);
         } finally {
-          if (lockAcquired) {
+          if (lockAcquired && typeof window !== 'undefined' && window.localStorage) {
             try {
               const raw = window.localStorage.getItem(lockKey);
               if (raw) {
                 const parsed = JSON.parse(raw);
-                // Stale owner protection: NEVER remove the lock if the lease already expired
                 const now = Date.now();
+                // Stale owner guard: NEVER remove the lock if lease expired or belongs to another owner
                 if (
                   parsed &&
                   parsed.owner === this.tabId &&
+                  parsed.fenceToken === currentFenceToken &&
                   typeof parsed.expiresAt === 'number' &&
                   parsed.expiresAt > now
                 ) {
@@ -273,12 +379,13 @@ export class ClientRequestScheduler {
         }
       }
 
-      // 3. Degraded fallback
+      // 3. Degraded fallback without storage
       const degradedContext: LockContext = {
         isValid: () => !signal?.aborted,
         ensureValid: () => {
           if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-        }
+        },
+        commitRecords: () => {}
       };
       return await action(degradedContext);
     } finally {
@@ -316,12 +423,17 @@ export class ClientRequestScheduler {
         const raw = window.localStorage.getItem(this.syncStorageKey);
         if (raw) {
           const parsed = JSON.parse(raw);
+          let records: RequestRecord[] = [];
           if (Array.isArray(parsed)) {
-            for (const item of parsed) {
-              if (item && typeof item.timestamp === 'number' && item.timestamp > windowStart) {
-                const id = item.id || `ext_${item.timestamp}_${Math.random()}`;
-                map.set(id, item.timestamp);
-              }
+            records = parsed;
+          } else if (parsed && Array.isArray(parsed.records)) {
+            records = parsed.records;
+          }
+
+          for (const item of records) {
+            if (item && typeof item.timestamp === 'number' && item.timestamp > windowStart) {
+              const id = item.id || `ext_${item.timestamp}_${Math.random()}`;
+              map.set(id, item.timestamp);
             }
           }
         }
@@ -334,7 +446,7 @@ export class ClientRequestScheduler {
 
   /**
    * Records a dispatched request timestamp locally and in shared multi-tab storage.
-   * Atomically coordinates across tabs with stale lock fencing.
+   * Atomically coordinates across tabs with stale lock fencing and OCC.
    */
   public async recordRequest(timestamp: number = Date.now()): Promise<void> {
     this.lastRequestTime = timestamp;
@@ -346,28 +458,37 @@ export class ClientRequestScheduler {
       if (existing) {
         existing.timestamp = timestamp;
       }
-      await this.withCrossTabLock(async (context) => {
-        if (typeof window !== 'undefined' && window.localStorage) {
-          try {
-            const raw = window.localStorage.getItem(this.syncStorageKey);
-            if (raw) {
-              const parsed = JSON.parse(raw);
-              if (Array.isArray(parsed)) {
-                for (const item of parsed) {
-                  if (item && item.id === reservationId) {
-                    item.timestamp = timestamp;
-                  }
-                }
-                context.ensureValid();
-                window.localStorage.setItem(this.syncStorageKey, JSON.stringify(parsed));
+
+      while (true) {
+        try {
+          await this.withCrossTabLock(async (context) => {
+            if (typeof window !== 'undefined' && window.localStorage) {
+              const raw = window.localStorage.getItem(this.syncStorageKey);
+              let records: RequestRecord[] = [];
+              if (raw) {
+                try {
+                  const parsed = JSON.parse(raw);
+                  if (Array.isArray(parsed)) records = parsed;
+                  else if (parsed && Array.isArray(parsed.records)) records = parsed.records;
+                } catch {}
               }
+              for (const item of records) {
+                if (item && item.id === reservationId) {
+                  item.timestamp = timestamp;
+                }
+              }
+              context.commitRecords(records);
             }
-          } catch (err) {
-            if (err instanceof StaleLockError) throw err;
+          });
+          return;
+        } catch (err) {
+          if (err instanceof StaleLockError) {
+            await this.delay(20);
+            continue;
           }
+          throw err;
         }
-      });
-      return;
+      }
     }
 
     // Standalone recordRequest invocation without preceding acquireToken
@@ -378,38 +499,45 @@ export class ClientRequestScheduler {
     };
     this.localRecords.push(record);
 
-    await this.withCrossTabLock(async (context) => {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        try {
-          const windowStart = timestamp - this.rollingWindowMs;
-          let existing: RequestRecord[] = [];
-          const raw = window.localStorage.getItem(this.syncStorageKey);
-          if (raw) {
-            try {
-              const parsed = JSON.parse(raw);
-              if (Array.isArray(parsed)) existing = parsed;
-            } catch {}
-          }
-
-          const map = new Map<string, RequestRecord>();
-          for (const r of existing) {
-            if (r && typeof r.timestamp === 'number' && r.timestamp > windowStart && r.id) {
-              map.set(r.id, r);
+    while (true) {
+      try {
+        await this.withCrossTabLock(async (context) => {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            const windowStart = timestamp - this.rollingWindowMs;
+            let existing: RequestRecord[] = [];
+            const raw = window.localStorage.getItem(this.syncStorageKey);
+            if (raw) {
+              try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) existing = parsed;
+                else if (parsed && Array.isArray(parsed.records)) existing = parsed.records;
+              } catch {}
             }
+
+            const map = new Map<string, RequestRecord>();
+            for (const r of existing) {
+              if (r && typeof r.timestamp === 'number' && r.timestamp > windowStart && r.id) {
+                map.set(r.id, r);
+              }
+            }
+            map.set(record.id, record);
+
+            const active = Array.from(map.values())
+              .sort((a, b) => a.timestamp - b.timestamp)
+              .slice(-100);
+
+            context.commitRecords(active);
           }
-          map.set(record.id, record);
-
-          const active = Array.from(map.values())
-            .sort((a, b) => a.timestamp - b.timestamp)
-            .slice(-100);
-
-          context.ensureValid();
-          window.localStorage.setItem(this.syncStorageKey, JSON.stringify(active));
-        } catch (err) {
-          if (err instanceof StaleLockError) throw err;
+        });
+        return;
+      } catch (err) {
+        if (err instanceof StaleLockError) {
+          await this.delay(20);
+          continue;
         }
+        throw err;
       }
-    });
+    }
   }
 
   /**
@@ -422,23 +550,32 @@ export class ClientRequestScheduler {
     this.localRecords = this.localRecords.filter((r) => r.id !== reservationId);
     this.tokens = Math.min(this.bucketCapacity, this.tokens + 1);
 
-    await this.withCrossTabLock(async (context) => {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        try {
-          const raw = window.localStorage.getItem(this.syncStorageKey);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-              const filtered = parsed.filter((r) => r && r.id !== reservationId);
-              context.ensureValid();
-              window.localStorage.setItem(this.syncStorageKey, JSON.stringify(filtered));
+    while (true) {
+      try {
+        await this.withCrossTabLock(async (context) => {
+          if (typeof window !== 'undefined' && window.localStorage) {
+            const raw = window.localStorage.getItem(this.syncStorageKey);
+            let existing: RequestRecord[] = [];
+            if (raw) {
+              try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) existing = parsed;
+                else if (parsed && Array.isArray(parsed.records)) existing = parsed.records;
+              } catch {}
             }
+            const filtered = existing.filter((r) => r && r.id !== reservationId);
+            context.commitRecords(filtered);
           }
-        } catch (err) {
-          if (err instanceof StaleLockError) throw err;
+        });
+        return;
+      } catch (err) {
+        if (err instanceof StaleLockError) {
+          await this.delay(20);
+          continue;
         }
+        throw err;
       }
-    });
+    }
   }
 
   /**
@@ -481,7 +618,7 @@ export class ClientRequestScheduler {
   /**
    * Acquires permission to dispatch a request, awaiting tokens or window capacity if necessary.
    * Respects AbortSignal for immediate cancellation and coordinates atomically across tabs.
-   * Defends against stale lock owners by verifying lease validity before writing reservations.
+   * Defends against stale lock owners by verifying lease validity and storage version before commit.
    */
   public async acquireToken(signal?: AbortSignal): Promise<void> {
     while (true) {
@@ -537,7 +674,7 @@ export class ClientRequestScheduler {
             }
           }
 
-          // Both rolling-window and token bucket have capacity: atomically claim slot
+          // Both rolling-window and token bucket have capacity: claim slot
           this.tokens = Math.max(0, this.tokens - 1);
           reservationId = `${this.tabId}_${lockTime}_${Math.random().toString(36).slice(2, 7)}`;
           this.activeReservations.push(reservationId);
@@ -549,41 +686,37 @@ export class ClientRequestScheduler {
           this.localRecords.push(reservedRecord);
 
           if (typeof window !== 'undefined' && window.localStorage) {
-            try {
-              const windowStart = lockTime - this.rollingWindowMs;
-              let existing: RequestRecord[] = [];
-              const raw = window.localStorage.getItem(this.syncStorageKey);
-              if (raw) {
-                try {
-                  const parsed = JSON.parse(raw);
-                  if (Array.isArray(parsed)) existing = parsed;
-                } catch {}
-              }
-              const map = new Map<string, RequestRecord>();
-              for (const r of existing) {
-                if (r && typeof r.timestamp === 'number' && r.timestamp > windowStart && r.id) {
-                  map.set(r.id, r);
-                }
-              }
-              map.set(reservedRecord.id, reservedRecord);
-
-              const active = Array.from(map.values())
-                .sort((a, b) => a.timestamp - b.timestamp)
-                .slice(-100);
-
-              // Fencing verification: ensure lock lease has not expired before persisting
-              context.ensureValid();
-              window.localStorage.setItem(this.syncStorageKey, JSON.stringify(active));
-            } catch (err) {
-              if (err instanceof StaleLockError) throw err;
+            const windowStart = lockTime - this.rollingWindowMs;
+            let existing: RequestRecord[] = [];
+            const raw = window.localStorage.getItem(this.syncStorageKey);
+            if (raw) {
+              try {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) existing = parsed;
+                else if (parsed && Array.isArray(parsed.records)) existing = parsed.records;
+              } catch {}
             }
+            const map = new Map<string, RequestRecord>();
+            for (const r of existing) {
+              if (r && typeof r.timestamp === 'number' && r.timestamp > windowStart && r.id) {
+                map.set(r.id, r);
+              }
+            }
+            map.set(reservedRecord.id, reservedRecord);
+
+            const active = Array.from(map.values())
+              .sort((a, b) => a.timestamp - b.timestamp)
+              .slice(-100);
+
+            // Fencing verification & atomic OCC commit
+            context.commitRecords(active);
           }
 
           acquiredSuccessfully = true;
         }, signal);
       } catch (err) {
         if (err instanceof StaleLockError) {
-          // Stale lease detected during critical section: rollback in-memory speculation and retry
+          // Stale lease or OCC conflict detected: rollback in-memory speculation and retry
           if (reservationId) {
             this.activeReservations = this.activeReservations.filter((id) => id !== reservationId);
             this.localRecords = this.localRecords.filter((r) => r.id !== reservationId);

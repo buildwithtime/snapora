@@ -285,7 +285,8 @@ describe('ClientRequestScheduler Unit & Multi-Tab Suite', () => {
       // Verify that all 20 records were saved without any being overwritten
       const raw = window.localStorage.getItem(storageKey);
       expect(raw).toBeTruthy();
-      const records = JSON.parse(raw!);
+      const parsed = JSON.parse(raw!);
+      const records = Array.isArray(parsed) ? parsed : parsed.records;
       expect(records.length).toBe(20);
 
       // Verify all record IDs are unique
@@ -374,6 +375,101 @@ describe('ClientRequestScheduler Unit & Multi-Tab Suite', () => {
       expect(window.localStorage.getItem(lockKey)).toBe(otherTabCandidate);
 
       vi.useRealTimers();
+    });
+
+    it('strictly prevents TOCTOU stale write from overwriting state or releasing another tab lock after lease expiry', async () => {
+      const storageKey = 'test_toctou_barrier';
+      const lockKey = `snapora_lock_${storageKey}_lease`;
+
+      const tabA = new ClientRequestScheduler({
+        syncStorageKey: storageKey,
+        leaseDurationMs: 500,
+        minPacingMs: 0
+      });
+
+      const tabB = new ClientRequestScheduler({
+        syncStorageKey: storageKey,
+        leaseDurationMs: 3000,
+        minPacingMs: 0
+      });
+
+      // Deterministic barriers for controllable suspension
+      let tabAValidatedOwnership: () => void = () => {};
+      const tabAValidatedPromise = new Promise<void>((r) => {
+        tabAValidatedOwnership = r;
+      });
+
+      let letTabAResume: () => void = () => {};
+      const resumeTabAPromise = new Promise<void>((r) => {
+        letTabAResume = r;
+      });
+
+      let tabACaughtError: any = null;
+
+      // 1. Tab A enters withCrossTabLock, validates ownership, and then is suspended at barrier
+      const tabAPromise = tabA.withCrossTabLock(async (context) => {
+        // Tab A initially validates ownership successfully
+        context.ensureValid();
+        expect(context.isValid()).toBe(true);
+
+        // Notify test that Tab A has passed validation and is now suspended
+        tabAValidatedOwnership();
+
+        // Tab A is suspended at the barrier, waiting to be resumed
+        await resumeTabAPromise;
+
+        // Tab A resumes and attempts its stale write
+        const tabAStaleRecord = [{ id: 'stale_record_from_tab_A', timestamp: Date.now() }];
+        context.commitRecords(tabAStaleRecord);
+      }).catch((err) => {
+        tabACaughtError = err;
+      });
+
+      // Wait until Tab A has validated ownership and is suspended at the barrier
+      await tabAValidatedPromise;
+
+      // 2. While Tab A is suspended at the barrier, simulate Tab A's lease expiration
+      // and Tab B acquiring the lease and updating shared state
+      const tabBRecord = [{ id: 'valid_record_from_tab_B', timestamp: Date.now() }];
+
+      // Overwrite lock with Tab B's active lease
+      const tabBLockPayload = {
+        owner: (tabB as any).tabId,
+        fenceToken: `fence_${(tabB as any).tabId}_1`,
+        expiresAt: Date.now() + 10000
+      };
+      window.localStorage.setItem(lockKey, JSON.stringify(tabBLockPayload));
+
+      // Tab B updates shared state under its valid lock
+      await tabB.withCrossTabLock(async (bContext) => {
+        bContext.commitRecords(tabBRecord);
+      });
+
+      // Verify Tab B's record and version 1 exist in storage
+      const storageAfterB = JSON.parse(window.localStorage.getItem(storageKey)!);
+      expect(storageAfterB.records).toEqual(tabBRecord);
+      expect(storageAfterB.version).toBe(1);
+
+      // Simulate Tab B actively holding a new lock when Tab A attempts its stale write
+      window.localStorage.setItem(lockKey, JSON.stringify(tabBLockPayload));
+
+      // 3. Now resume Tab A and let it attempt to commit its stale write
+      letTabAResume();
+      await tabAPromise;
+
+      // 4. Verification:
+      // a) Tab A's stale commit was rejected with StaleLockError
+      expect(tabACaughtError).toBeInstanceOf(StaleLockError);
+
+      // b) Tab A did NOT overwrite Tab B's state!
+      const finalStorage = JSON.parse(window.localStorage.getItem(storageKey)!);
+      expect(finalStorage.records).toEqual(tabBRecord);
+      expect(finalStorage.version).toBe(1);
+      expect(finalStorage.records).not.toContainEqual(expect.objectContaining({ id: 'stale_record_from_tab_A' }));
+
+      // c) Tab A's finally block did NOT delete or overwrite Tab B's lock!
+      const finalLock = JSON.parse(window.localStorage.getItem(lockKey)!);
+      expect(finalLock.owner).toBe((tabB as any).tabId);
     });
   });
 });
