@@ -15,9 +15,11 @@ import { parseInstagramUrl, USERNAME_REGEX } from '../utils/urlParser.js';
 import { safeHttpsRequest } from '../utils/ssrfClient.js';
 import { config } from '../config/index.js';
 import { parseRetryAfter, formatRateLimitMessage } from '../utils/errors.js';
+import { upstreamResilienceManager, UpstreamResilienceManager } from '../utils/resilience.js';
 
 export interface PublicWebProviderOptions {
   timeoutMs?: number;
+  resilienceManager?: UpstreamResilienceManager;
 }
 
 export class PublicWebMediaProvider implements IMediaProvider {
@@ -25,9 +27,11 @@ export class PublicWebMediaProvider implements IMediaProvider {
   readonly name = 'Instagram Public Web Provider';
 
   private timeoutMs: number;
+  private resilienceManager: UpstreamResilienceManager;
 
   constructor(options: PublicWebProviderOptions = {}) {
     this.timeoutMs = options.timeoutMs || config.resolverTimeoutMs || 15000;
+    this.resilienceManager = options.resilienceManager || upstreamResilienceManager;
   }
 
   getCapabilities(): ProviderCapabilities {
@@ -47,7 +51,7 @@ export class PublicWebMediaProvider implements IMediaProvider {
     return parsed.valid && (parsed.contentType === 'post' || parsed.contentType === 'reel' || parsed.contentType === 'tv');
   }
 
-  async resolve(url: string, shortcode: string, _options?: ResolveOptions): Promise<ResolveResult> {
+  async resolve(url: string, shortcode: string, options?: ResolveOptions): Promise<ResolveResult> {
     const parsed = parseInstagramUrl(url);
     if (!parsed.valid || !parsed.canonicalUrl) {
       return {
@@ -63,7 +67,19 @@ export class PublicWebMediaProvider implements IMediaProvider {
     }
 
     const canonicalUrl = parsed.canonicalUrl;
+    return this.resilienceManager.executeResolve(
+      canonicalUrl,
+      shortcode,
+      async (signal) => this.fetchAndParsePost(canonicalUrl, shortcode, signal),
+      options?.signal
+    );
+  }
 
+  private async fetchAndParsePost(
+    canonicalUrl: string,
+    shortcode: string,
+    signal?: AbortSignal
+  ): Promise<ResolveResult> {
     try {
       // Execute SSRF-hardened HTTPS fetch to public Instagram web permalink
       const safeResponse = await safeHttpsRequest(canonicalUrl, {
@@ -78,7 +94,8 @@ export class PublicWebMediaProvider implements IMediaProvider {
           'Sec-Fetch-Site': 'none'
         },
         timeoutMs: this.timeoutMs,
-        maxResponseSizeBytes: 5 * 1024 * 1024 // 5MB max for HTML payload
+        maxResponseSizeBytes: 5 * 1024 * 1024, // 5MB max for HTML payload
+        signal
       });
 
       // Handle upstream HTTP statuses
@@ -107,7 +124,7 @@ export class PublicWebMediaProvider implements IMediaProvider {
           provider: this.id,
           shortcode,
           error: {
-            code: 'RATE_LIMITED',
+            code: 'UPSTREAM_RATE_LIMITED',
             message,
             ...(retrySeconds && retrySeconds > 0 ? { retryAfterSeconds: retrySeconds } : {})
           }
@@ -582,7 +599,19 @@ export class PublicWebMediaProvider implements IMediaProvider {
     }
 
     const canonicalProfileUrl = `https://www.instagram.com/${username}/`;
+    return this.resilienceManager.executeDiscoverProfile(
+      canonicalProfileUrl,
+      username,
+      async (signal) => this.fetchAndParseProfile(canonicalProfileUrl, username, signal),
+      options?.signal
+    );
+  }
 
+  private async fetchAndParseProfile(
+    canonicalProfileUrl: string,
+    username: string,
+    signal?: AbortSignal
+  ): Promise<ProfileDiscoveryResult> {
     try {
       const safeResponse = await safeHttpsRequest(canonicalProfileUrl, {
         method: 'GET',
@@ -596,7 +625,8 @@ export class PublicWebMediaProvider implements IMediaProvider {
           'Sec-Fetch-Site': 'none'
         },
         timeoutMs: this.timeoutMs,
-        maxResponseSizeBytes: 8 * 1024 * 1024 // 8MB ceiling
+        maxResponseSizeBytes: 8 * 1024 * 1024, // 8MB ceiling
+        signal
       });
 
       if (safeResponse.statusCode === 404) {
@@ -620,7 +650,7 @@ export class PublicWebMediaProvider implements IMediaProvider {
           ok: false,
           provider: this.name,
           error: {
-            code: 'RATE_LIMITED',
+            code: 'UPSTREAM_RATE_LIMITED',
             message,
             ...(retrySeconds && retrySeconds > 0 ? { retryAfterSeconds: retrySeconds } : {})
           }

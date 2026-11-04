@@ -77,10 +77,24 @@ export async function profileRoutes(app: FastifyInstance, options?: { provider?:
         );
       }
 
+      const clientAbortController = new AbortController();
+      const onClose = () => {
+        if (!reply.raw.writableEnded) {
+          clientAbortController.abort();
+        }
+      };
+
+      if (request.raw.destroyed) {
+        clientAbortController.abort();
+      } else {
+        request.raw.on('close', onClose);
+      }
+
       try {
         const result = await provider.discoverProfile(canonicalUrl, {
           cursor,
-          userAccessToken
+          userAccessToken,
+          signal: clientAbortController.signal
         });
 
         // Enforce server-side ceiling of 500 items per response to protect memory
@@ -104,7 +118,10 @@ export async function profileRoutes(app: FastifyInstance, options?: { provider?:
               ? 404
               : result.error.code === 'EXPIRED_MEDIA_URL' || result.error.code === 'MEDIA_URL_EXPIRED'
               ? 410
-              : result.error.code === 'RATE_LIMITED' || result.error.code === 'HTTP_429_RATE_LIMITED'
+              : result.error.code === 'RATE_LIMITED' ||
+                result.error.code === 'HTTP_429_RATE_LIMITED' ||
+                result.error.code === 'UPSTREAM_RATE_LIMITED' ||
+                result.error.code === 'LOCAL_RATE_LIMITED'
               ? 429
               : result.error.code === 'PROVIDER_NOT_CONFIGURED' || result.error.code === 'CONFIGURATION_REQUIRED'
               ? 503
@@ -115,8 +132,12 @@ export async function profileRoutes(app: FastifyInstance, options?: { provider?:
               ? 400
               : 502;
 
-          if (status === 429 && result.error.retryAfterSeconds && result.error.retryAfterSeconds > 0) {
-            reply.header('Retry-After', result.error.retryAfterSeconds.toString());
+          if (status === 429) {
+            const isLocal = result.error.code === 'LOCAL_RATE_LIMITED';
+            reply.header('X-RateLimit-Source', isLocal ? 'snapora' : 'upstream');
+            if (result.error.retryAfterSeconds && result.error.retryAfterSeconds > 0) {
+              reply.header('Retry-After', result.error.retryAfterSeconds.toString());
+            }
           }
 
           return reply.status(status).send(result);
@@ -124,10 +145,20 @@ export async function profileRoutes(app: FastifyInstance, options?: { provider?:
 
         return reply.status(200).send(result);
       } catch (err: unknown) {
+        if (clientAbortController.signal.aborted || (err as any)?.name === 'AbortError') {
+          // Client disconnected or cancelled before response could be sent.
+          if (!reply.raw.writableEnded) {
+            reply.raw.destroy();
+          }
+          return;
+        }
+
         request.log.error(err, 'Profile discovery failure');
         return reply.status(500).send(
           createErrorResponse('PROVIDER_ERROR', 'An unexpected error occurred while discovering profile media')
         );
+      } finally {
+        request.raw.off('close', onClose);
       }
     }
   );

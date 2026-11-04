@@ -2,12 +2,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { PublicWebMediaProvider } from './public.js';
 import * as ssrfClient from '../utils/ssrfClient.js';
 import { Readable } from 'node:stream';
+import { UpstreamResilienceManager } from '../utils/resilience.js';
 
 describe('PublicWebMediaProvider Suite', () => {
   let provider: PublicWebMediaProvider;
+  let resilienceManager: UpstreamResilienceManager;
 
   beforeEach(() => {
-    provider = new PublicWebMediaProvider({ timeoutMs: 5000 });
+    resilienceManager = new UpstreamResilienceManager();
+    provider = new PublicWebMediaProvider({ timeoutMs: 5000, resilienceManager });
     vi.restoreAllMocks();
   });
 
@@ -255,10 +258,10 @@ describe('PublicWebMediaProvider Suite', () => {
     const res = await provider.resolve('https://www.instagram.com/p/rate_limited/', 'rate_limited');
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.error.code).toBe('RATE_LIMITED');
+      expect(res.error.code).toBe('UPSTREAM_RATE_LIMITED');
       expect(res.status).toBe('rate_limited');
-      expect(res.error.message).toBe('Instagram is temporarily limiting requests. Please try again later.');
-      expect(res.error.retryAfterSeconds).toBeUndefined();
+      expect(res.error.message).toBe('Instagram is temporarily limiting requests. Please try again in 1 minute.');
+      expect(res.error.retryAfterSeconds).toBe(60);
     }
   });
 
@@ -273,7 +276,7 @@ describe('PublicWebMediaProvider Suite', () => {
     const res = await provider.resolve('https://www.instagram.com/p/rate_limited/', 'rate_limited');
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.error.code).toBe('RATE_LIMITED');
+      expect(res.error.code).toBe('UPSTREAM_RATE_LIMITED');
       expect(res.status).toBe('rate_limited');
       expect(res.error.message).toBe('Instagram is temporarily limiting requests. Please try again in 45 seconds.');
       expect(res.error.retryAfterSeconds).toBe(45);
@@ -292,7 +295,7 @@ describe('PublicWebMediaProvider Suite', () => {
     const res = await provider.resolve('https://www.instagram.com/p/rate_limited/', 'rate_limited');
     expect(res.ok).toBe(false);
     if (!res.ok) {
-      expect(res.error.code).toBe('RATE_LIMITED');
+      expect(res.error.code).toBe('UPSTREAM_RATE_LIMITED');
       expect(res.status).toBe('rate_limited');
       expect(res.error.message).toMatch(/Instagram is temporarily limiting requests\. Please try again in \d+ minute/);
       expect(res.error.retryAfterSeconds).toBeGreaterThan(0);

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useProfileGallery } from '../../context/ProfileGalleryContext.js';
 import { ProfileHeader } from './ProfileHeader.js';
 import { SelectionToolbar } from './SelectionToolbar.js';
@@ -8,6 +8,23 @@ import { CarouselSlideModal } from './CarouselSlideModal.js';
 export const ProfileGallery: React.FC = () => {
   const { state, loadMore, closeGallery, loadProfile } = useProfileGallery();
   const [feedback, setFeedback] = useState<string | null>(null);
+  const [retryCountdown, setRetryCountdown] = useState<number>(0);
+
+  useEffect(() => {
+    if (state.error?.retryAfterSeconds && state.error.retryAfterSeconds > 0) {
+      setRetryCountdown(state.error.retryAfterSeconds);
+    } else {
+      setRetryCountdown(0);
+    }
+  }, [state.error]);
+
+  useEffect(() => {
+    if (retryCountdown <= 0) return;
+    const interval = setInterval(() => {
+      setRetryCountdown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [retryCountdown]);
 
   if (!state.isOpen) {
     return null;
@@ -108,7 +125,9 @@ export const ProfileGallery: React.FC = () => {
               ? '🔒'
               : state.error.code === 'LOGIN_WALL_ENCOUNTERED'
               ? '🛡️'
-              : state.error.code === 'RATE_LIMITED'
+              : state.error.code === 'UPSTREAM_RATE_LIMITED' ||
+                state.error.code === 'RATE_LIMITED' ||
+                state.error.code === 'LOCAL_RATE_LIMITED'
               ? '⏳'
               : '⚠️'}
           </div>
@@ -118,8 +137,10 @@ export const ProfileGallery: React.FC = () => {
               ? 'Private Instagram Account'
               : state.error.code === 'LOGIN_WALL_ENCOUNTERED'
               ? 'Instagram Login Required'
-              : state.error.code === 'RATE_LIMITED'
-              ? 'Rate Limit Reached'
+              : state.error.code === 'UPSTREAM_RATE_LIMITED' || state.error.code === 'RATE_LIMITED'
+              ? 'Instagram Rate Limit Active'
+              : state.error.code === 'LOCAL_RATE_LIMITED'
+              ? 'Snapora Request Limit Reached'
               : 'Profile Discovery Error'}
           </h3>
 
@@ -127,14 +148,37 @@ export const ProfileGallery: React.FC = () => {
             {state.error.message}
           </p>
 
+          {retryCountdown > 0 && (
+            <div
+              style={{
+                margin: '0 auto 1.5rem',
+                padding: '0.5rem 1rem',
+                borderRadius: '6px',
+                background: 'rgba(251, 146, 60, 0.15)',
+                border: '1px solid rgba(251, 146, 60, 0.3)',
+                color: '#fb923c',
+                fontWeight: 600,
+                fontSize: '0.88rem',
+                maxWidth: '420px'
+              }}
+            >
+              ⏳ Cooldown active: Retry available in {retryCountdown}s
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
-            {state.profile?.username && (
+            {(state.profile?.username || state.targetUsername) && (
               <button
                 type="button"
-                onClick={() => loadProfile(state.profile!.username)}
+                onClick={() => loadProfile(state.profile?.username || state.targetUsername!)}
+                disabled={retryCountdown > 0}
                 className="btn btn-primary btn-sm"
+                style={{
+                  opacity: retryCountdown > 0 ? 0.6 : 1,
+                  cursor: retryCountdown > 0 ? 'not-allowed' : 'pointer'
+                }}
               >
-                🔄 Retry Discovery
+                {retryCountdown > 0 ? `⏳ Wait (${retryCountdown}s)` : '🔄 Retry Discovery'}
               </button>
             )}
             <button

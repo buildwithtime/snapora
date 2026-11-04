@@ -10,14 +10,17 @@ import { healthRoutes } from './routes/health.js';
 import { resolveRoutes } from './routes/resolve.js';
 import { profileRoutes } from './routes/profile.js';
 import { downloadRoutes } from './routes/download.js';
-import { createErrorResponse, formatRateLimitMessage } from './utils/errors.js';
+import { createErrorResponse, formatRateLimitMessage, ErrorCode } from './utils/errors.js';
 import { IMediaProvider } from './providers/types.js';
+import { upstreamResilienceManager } from './utils/resilience.js';
 
 export interface BuildServerOptions {
   provider?: IMediaProvider;
   enableRateLimit?: boolean;
   serveStatic?: boolean;
   corsOrigin?: string[] | boolean;
+  rateLimitMax?: number;
+  rateLimitWindowMs?: number;
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
@@ -39,21 +42,27 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   // Security: Rate limiting
   if (options.enableRateLimit !== false) {
     await app.register(rateLimit, {
-      max: config.rateLimitMax,
-      timeWindow: config.rateLimitWindowMs,
+      max: options.rateLimitMax ?? config.rateLimitMax,
+      timeWindow: options.rateLimitWindowMs ?? config.rateLimitWindowMs,
       errorResponseBuilder: (_request, context) => {
         const retryAfterSeconds = typeof (context as any)?.after === 'number'
           ? Math.ceil((context as any).after / 1000)
           : typeof (context as any)?.ttl === 'number'
           ? Math.ceil((context as any).ttl / 1000)
           : null;
-        const message = formatRateLimitMessage(retryAfterSeconds);
-        return createErrorResponse(
-          'RATE_LIMITED',
+        const message = formatRateLimitMessage(retryAfterSeconds, 'snapora');
+        const errPayload = createErrorResponse(
+          'LOCAL_RATE_LIMITED',
           message,
           undefined,
           retryAfterSeconds && retryAfterSeconds > 0 ? retryAfterSeconds : undefined
         );
+        const rateLimitError = Object.assign(new Error(message), errPayload, {
+          statusCode: (context as any)?.statusCode || 429,
+          code: 'LOCAL_RATE_LIMITED',
+          retryAfterSeconds: retryAfterSeconds && retryAfterSeconds > 0 ? retryAfterSeconds : undefined
+        });
+        return rateLimitError;
       }
     });
   }
@@ -64,6 +73,10 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
     reply.header('X-Frame-Options', 'SAMEORIGIN');
     reply.header('Referrer-Policy', 'strict-origin-when-cross-origin');
     reply.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
+    if (reply.statusCode === 429 && !reply.getHeader('x-ratelimit-source')) {
+      reply.header('X-RateLimit-Source', 'snapora');
+    }
 
     const reqUrl = request.raw.url || request.url || '';
     if (reqUrl.startsWith('/api')) {
@@ -76,15 +89,30 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   app.setErrorHandler((error, request, reply) => {
     request.log.error(error);
     const statusCode = error.statusCode || 500;
-    const code = statusCode === 429 ? 'RATE_LIMITED' : 'PROVIDER_ERROR';
+
+    // Explicit handling: preserve rate limit codes vs internal provider errors
+    let code: ErrorCode = 'PROVIDER_ERROR';
+    if (statusCode === 429) {
+      const explicitCode = (error as any).code || (error as any).error?.code;
+      if (explicitCode === 'UPSTREAM_RATE_LIMITED' || explicitCode === 'LOCAL_RATE_LIMITED') {
+        code = explicitCode;
+      } else {
+        code = 'LOCAL_RATE_LIMITED';
+      }
+    }
+
+    const retryAfter = (error as any).retryAfterSeconds || (error as any).error?.retryAfterSeconds;
+    if (statusCode === 429 && retryAfter && !reply.getHeader('retry-after')) {
+      reply.header('retry-after', retryAfter.toString());
+    }
 
     let clientMessage = error.message || 'An internal error occurred';
-    if (config.nodeEnv === 'production' && statusCode >= 500) {
+    if ((config.nodeEnv === 'production' || process.env.NODE_ENV === 'production') && statusCode >= 500) {
       clientMessage = 'An unexpected internal server error occurred. Please try again later.';
     }
 
     reply.status(statusCode).send(
-      createErrorResponse(code, clientMessage)
+      createErrorResponse(code, clientMessage, (error as any).details || (error as any).error?.details, retryAfter)
     );
   });
 
@@ -93,6 +121,14 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await app.register(resolveRoutes, { provider: options.provider });
   await app.register(profileRoutes, { provider: options.provider });
   await app.register(downloadRoutes);
+
+  // Aggregate operational metrics (separate from public health endpoint)
+  app.get('/api/admin/metrics', async (_request, reply) => {
+    return reply.status(200).send({
+      ok: true,
+      metrics: upstreamResilienceManager.getMetrics()
+    });
+  });
 
   // Serve compiled frontend when dist directory exists (single-service deployment)
   if (options.serveStatic === true || (options.serveStatic !== false && config.nodeEnv !== 'test')) {

@@ -13,7 +13,7 @@ import { discoverProfileClientMock } from '../utils/mockResolver.js';
 import { parseInstagramUrl } from '../utils/urlValidator.js';
 
 type ProfileAction =
-  | { type: 'START_LOAD' }
+  | { type: 'START_LOAD'; payload?: { username?: string } }
   | {
       type: 'LOAD_SUCCESS';
       payload: {
@@ -68,6 +68,7 @@ function profileGalleryReducer(state: ProfileGalleryState, action: ProfileAction
         isLoadingMore: false,
         error: null,
         profile: null,
+        targetUsername: action.payload?.username || state.targetUsername,
         items: [],
         selectedIds: new Set<string>(),
         filter: 'all',
@@ -241,7 +242,7 @@ export const ProfileGalleryProvider: React.FC<{ children: React.ReactNode }> = (
     const cleanUsername = username.toLowerCase();
     activeUsernameRef.current = cleanUsername;
 
-    dispatch({ type: 'START_LOAD' });
+    dispatch({ type: 'START_LOAD', payload: { username: cleanUsername || urlOrUsername } });
 
     try {
       const resp = await safeFetchJson<ProfileDiscoveryResult>(`${apiBaseUrl}/api/profile/discover`, {
@@ -288,7 +289,11 @@ export const ProfileGalleryProvider: React.FC<{ children: React.ReactNode }> = (
           payload: {
             code: resp.data.error.code,
             message: resp.data.error.message,
-            retryAfterSeconds: resp.data.error.retryAfterSeconds
+            retryAfterSeconds:
+              resp.data.error.retryAfterSeconds ||
+              (resp.data.error.code === 'UPSTREAM_RATE_LIMITED' || resp.data.error.code === 'RATE_LIMITED'
+                ? 60
+                : undefined)
           }
         });
         return;
@@ -331,7 +336,11 @@ export const ProfileGalleryProvider: React.FC<{ children: React.ReactNode }> = (
           payload: {
             code: resp.error.code,
             message: resp.error.message,
-            retryAfterSeconds: resp.status === 429 ? 60 : undefined
+            retryAfterSeconds:
+              resp.error.retryAfterSeconds ||
+              (resp.status === 429 || resp.error.code === 'UPSTREAM_RATE_LIMITED' || resp.error.code === 'RATE_LIMITED'
+                ? 60
+                : undefined)
           }
         });
         return;

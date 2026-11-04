@@ -103,6 +103,8 @@ export interface QueueJob {
   error?: {
     code: string;
     message: string;
+    retryAfterSeconds?: number;
+    rateLimitSource?: 'upstream' | 'snapora';
   };
   retryCount: number;
 }
@@ -126,6 +128,9 @@ export type QueueState = {
   isPaused: boolean;
   activeJobId: string | null;
   downloadAllStats?: DownloadAllStats | null;
+  upstreamCooldownUntil?: number | null;
+  upstreamCooldownRemaining?: number | null;
+  upstreamRateLimitSource?: 'upstream' | 'snapora' | null;
 };
 
 export type QueueAction =
@@ -147,10 +152,23 @@ export type QueueAction =
         takenAt?: number | string;
       };
     }
-  | { type: 'JOB_FAILURE'; payload: { jobId: string; code: string; message: string; resolutionStatus?: ResolutionStatus } }
+  | {
+      type: 'JOB_FAILURE';
+      payload: {
+        jobId: string;
+        code: string;
+        message: string;
+        resolutionStatus?: ResolutionStatus;
+        retryAfterSeconds?: number;
+        rateLimitSource?: 'upstream' | 'snapora';
+      };
+    }
   | { type: 'UPDATE_JOB_PROGRESS'; payload: { jobId: string; percent: number; bytesDownloaded?: number; totalBytes?: number } }
   | { type: 'PAUSE_QUEUE' }
   | { type: 'RESUME_QUEUE' }
+  | { type: 'TRIGGER_COOLDOWN'; payload: { seconds: number; source?: 'upstream' | 'snapora' } }
+  | { type: 'TICK_COOLDOWN' }
+  | { type: 'CLEAR_COOLDOWN' }
   | { type: 'RETRY_JOB'; payload: { jobId: string } }
   | { type: 'REMOVE_JOB'; payload: { jobId: string } }
   | { type: 'CLEAR_COMPLETED' }

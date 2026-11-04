@@ -267,4 +267,48 @@ describe('POST /api/profile/discover', () => {
     expect(body.pagination.hasMore).toBe(false);
     await localApp.close();
   });
+
+  it('propagates client abort signal to provider discoverProfile operation', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const testProvider = {
+      id: 'signal_test',
+      name: 'SignalTestProvider',
+      getCapabilities: () => ({
+        supportsPreview: true,
+        supportsMetadata: true,
+        supportsOriginalDownload: true,
+        supportsCarousel: true,
+        requiresAuthentication: false,
+        requiresConfiguration: false,
+        supportsProfileDiscovery: true
+      }),
+      canResolve: () => true,
+      resolve: async () => ({ ok: false } as any),
+      canDiscoverProfile: () => true,
+      discoverProfile: async (_url: string, options?: any) => {
+        capturedSignal = options?.signal;
+        return {
+          ok: true,
+          provider: 'SignalTestProvider',
+          profile: { username: 'signal_user', isPrivate: false },
+          items: [],
+          pagination: { hasMore: false }
+        };
+      }
+    };
+
+    const localApp = await buildServer({ provider: testProvider as any, enableRateLimit: false });
+    const res = await localApp.inject({
+      method: 'POST',
+      url: '/api/profile/discover',
+      payload: {
+        url: 'https://www.instagram.com/signal_user/'
+      }
+    });
+
+    expect(res.statusCode).toBe(200);
+    expect(capturedSignal).toBeDefined();
+    expect(typeof capturedSignal?.addEventListener).toBe('function');
+    await localApp.close();
+  });
 });

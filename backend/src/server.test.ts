@@ -160,6 +160,7 @@ describe('Snapora Backend API & Security Suite', () => {
       expect(response.headers['cache-control']).toBe('no-store, no-cache, must-revalidate');
       expect(response.headers['pragma']).toBe('no-cache');
       expect(response.headers['retry-after']).toBe('60');
+      expect(response.headers['x-ratelimit-source']).toBe('upstream');
 
       const json = response.json();
       expect(json.ok).toBe(false);
@@ -502,6 +503,94 @@ describe('Snapora Backend API & Security Suite', () => {
       });
 
       expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    });
+  });
+
+  describe('Operational Metrics Endpoint', () => {
+    it('returns operational resilience metrics at /api/admin/metrics', async () => {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/admin/metrics'
+      });
+
+      expect(response.statusCode).toBe(200);
+      const json = response.json();
+      expect(json.ok).toBe(true);
+      expect(json.metrics).toBeDefined();
+      expect(typeof json.metrics.upstream429Count).toBe('number');
+      expect(typeof json.metrics.cacheHits).toBe('number');
+      expect(typeof json.metrics.cacheMisses).toBe('number');
+      expect(typeof json.metrics.cooldownShortCircuits).toBe('number');
+      expect(typeof json.metrics.deduplicatedRequests).toBe('number');
+    });
+  });
+
+  describe('Fastify Rate Limiter Status and Error Response Handling', () => {
+    let rateLimitedApp: FastifyInstance;
+
+    beforeAll(async () => {
+      rateLimitedApp = await buildServer({
+        provider: new MockProvider(),
+        enableRateLimit: true,
+        rateLimitMax: 2,
+        rateLimitWindowMs: 60000
+      });
+      await rateLimitedApp.ready();
+    });
+
+    afterAll(async () => {
+      await rateLimitedApp.close();
+    });
+
+    it('proves the third request returns HTTP 429 when the configured limit is two', async () => {
+      const res1 = await rateLimitedApp.inject({ method: 'GET', url: '/api/health' });
+      expect(res1.statusCode).toBe(200);
+
+      const res2 = await rateLimitedApp.inject({ method: 'GET', url: '/api/health' });
+      expect(res2.statusCode).toBe(200);
+
+      const res3 = await rateLimitedApp.inject({ method: 'GET', url: '/api/health' });
+      expect(res3.statusCode).toBe(429);
+      expect(res3.headers['x-ratelimit-source']).toBe('snapora');
+      expect(res3.headers['retry-after']).toBeDefined();
+
+      const json = res3.json();
+      expect(json.ok).toBe(false);
+      expect(json.error).toBeDefined();
+      expect(json.error.code).toBe('LOCAL_RATE_LIMITED');
+      expect(json.error.message).toContain('Snapora request limit reached');
+      expect(typeof json.error.retryAfterSeconds).toBe('number');
+      expect(json.error.retryAfterSeconds).toBeGreaterThan(0);
+    });
+
+    it('preserves HTTP 429 and does not sanitize rate limits to generic 500 in production', async () => {
+      const prevEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        const prodApp = await buildServer({
+          provider: new MockProvider(),
+          enableRateLimit: true,
+          rateLimitMax: 1,
+          rateLimitWindowMs: 60000
+        });
+        await prodApp.ready();
+
+        const first = await prodApp.inject({ method: 'GET', url: '/api/health' });
+        expect(first.statusCode).toBe(200);
+
+        const second = await prodApp.inject({ method: 'GET', url: '/api/health' });
+        expect(second.statusCode).toBe(429);
+
+        const json = second.json();
+        expect(json.ok).toBe(false);
+        expect(json.error.code).toBe('LOCAL_RATE_LIMITED');
+        expect(json.error.message).not.toContain('An unexpected internal server error');
+        expect(json.error.message).toContain('Snapora request limit reached');
+
+        await prodApp.close();
+      } finally {
+        process.env.NODE_ENV = prevEnv;
+      }
     });
   });
 });

@@ -74,6 +74,9 @@ export const QueueControls: React.FC = () => {
   const previewOnlyCount = totalResolvedItems - downloadableCount;
   const stats = state.downloadAllStats;
   const isDownloadingAll = Boolean(stats?.active);
+  const isCoolingDown = Boolean(
+    state.upstreamCooldownRemaining && state.upstreamCooldownRemaining > 0
+  );
 
   return (
     <div style={{ marginBottom: '1.25rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
@@ -311,10 +314,21 @@ export const QueueControls: React.FC = () => {
             <button
               type="button"
               onClick={resumeQueue}
+              disabled={isCoolingDown}
               className="btn btn-secondary btn-sm"
-              style={{ color: '#34d399', borderColor: 'rgba(52, 211, 153, 0.4)' }}
+              style={{
+                color: isCoolingDown ? 'var(--text-secondary, #94a3b8)' : '#34d399',
+                borderColor: isCoolingDown ? 'rgba(255, 255, 255, 0.1)' : 'rgba(52, 211, 153, 0.4)',
+                cursor: isCoolingDown ? 'not-allowed' : 'pointer',
+                opacity: isCoolingDown ? 0.6 : 1
+              }}
+              title={
+                isCoolingDown
+                  ? `Queue is cooling down. Resume will be available in ${state.upstreamCooldownRemaining}s.`
+                  : 'Resume processing queued items'
+              }
             >
-              ▶ Resume Queue
+              {isCoolingDown ? `⏳ Cooldown (${state.upstreamCooldownRemaining}s)` : '▶ Resume Queue'}
             </button>
           ) : (
             <button
@@ -340,6 +354,47 @@ export const QueueControls: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Rate-Limit Cooldown Banner */}
+      {isCoolingDown && (
+        <div
+          role="alert"
+          style={{
+            padding: '0.75rem 1rem',
+            borderRadius: 'var(--radius-sm, 8px)',
+            background: 'rgba(251, 146, 60, 0.12)',
+            border: '1px solid rgba(251, 146, 60, 0.35)',
+            color: '#fb923c',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.75rem',
+            fontSize: '0.85rem',
+            fontWeight: 500
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span>⏳</span>
+            <span>
+              {state.upstreamRateLimitSource === 'snapora'
+                ? 'Snapora request rate limit active. Queue paused to prevent throttling.'
+                : 'Instagram rate limit active. Queue paused to prevent request exhaustion.'}
+            </span>
+          </div>
+          <span
+            style={{
+              fontWeight: 700,
+              fontSize: '0.82rem',
+              padding: '0.2rem 0.6rem',
+              borderRadius: '6px',
+              background: 'rgba(251, 146, 60, 0.2)',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            Cooldown: {state.upstreamCooldownRemaining}s
+          </span>
+        </div>
+      )}
 
       {/* Active Download All / ZIP Progress Banner */}
       {isDownloadingAll && stats && (

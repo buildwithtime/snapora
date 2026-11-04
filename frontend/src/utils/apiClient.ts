@@ -17,6 +17,8 @@ export interface ApiError {
   code: string;
   message: string;
   status?: number;
+  retryAfterSeconds?: number;
+  rateLimitSource?: 'upstream' | 'snapora';
 }
 
 export interface ApiSuccessResult<T> {
@@ -112,21 +114,31 @@ export function mapHttpStatusToError(status: number, rawSnippet?: string): ApiEr
 export function extractStructuredError(parsed: unknown): ApiError | null {
   if (parsed && typeof parsed === 'object') {
     const obj = parsed as Record<string, unknown>;
-    // Format 1: { error: { code: string, message: string } }
+    // Format 1: { error: { code: string, message: string, retryAfterSeconds?: number } }
     if (obj.error && typeof obj.error === 'object') {
       const err = obj.error as Record<string, unknown>;
       if (typeof err.code === 'string' && typeof err.message === 'string') {
+        const retrySec =
+          typeof err.retryAfterSeconds === 'number' && err.retryAfterSeconds > 0
+            ? err.retryAfterSeconds
+            : undefined;
         return {
           code: err.code,
-          message: err.message
+          message: err.message,
+          ...(retrySec ? { retryAfterSeconds: retrySec } : {})
         };
       }
     }
-    // Format 2: { code: string, message: string }
+    // Format 2: { code: string, message: string, retryAfterSeconds?: number }
     if (typeof obj.code === 'string' && typeof obj.message === 'string') {
+      const retrySec =
+        typeof obj.retryAfterSeconds === 'number' && obj.retryAfterSeconds > 0
+          ? obj.retryAfterSeconds
+          : undefined;
       return {
         code: obj.code,
-        message: obj.message
+        message: obj.message,
+        ...(retrySec ? { retryAfterSeconds: retrySec } : {})
       };
     }
     // Format 3: Fastify default error { error: string, message: string, statusCode?: number }
@@ -220,7 +232,46 @@ export async function safeFetchJson<T>(
     };
   }
 
+  // Read Rate-Limit headers if present
+  const retryHeader = response.headers?.get?.('retry-after');
+  let headerRetrySeconds: number | undefined;
+  if (retryHeader) {
+    const numeric = parseInt(retryHeader, 10);
+    if (!isNaN(numeric) && numeric >= 0) {
+      headerRetrySeconds = numeric;
+    } else {
+      const parsedDate = Date.parse(retryHeader);
+      if (!isNaN(parsedDate)) {
+        const diff = Math.ceil((parsedDate - Date.now()) / 1000);
+        if (diff > 0) headerRetrySeconds = diff;
+      }
+    }
+  }
+
+  const rawSource = response.headers?.get?.('x-ratelimit-source');
+  const rateLimitSource: 'upstream' | 'snapora' | undefined =
+    rawSource === 'snapora' ? 'snapora' : rawSource === 'upstream' ? 'upstream' : undefined;
+
   const trimmed = rawText.trim();
+
+  // Helper to enrich fallback error with rate limit headers
+  const enrichRateLimitError = (err: ApiError): ApiError => {
+    if (response.status === 429) {
+      if (rateLimitSource === 'snapora') {
+        err.code = 'LOCAL_RATE_LIMITED';
+        err.message = 'Snapora request limit reached. Please try again later.';
+      } else if (rateLimitSource === 'upstream') {
+        err.code = 'UPSTREAM_RATE_LIMITED';
+      }
+      if (headerRetrySeconds) {
+        err.retryAfterSeconds = headerRetrySeconds;
+      }
+      if (rateLimitSource) {
+        err.rateLimitSource = rateLimitSource;
+      }
+    }
+    return err;
+  };
 
   // Handle empty bodies
   if (!trimmed) {
@@ -238,7 +289,7 @@ export async function safeFetchJson<T>(
     return {
       ok: false,
       status: response.status,
-      error: mapHttpStatusToError(response.status)
+      error: enrichRateLimitError(mapHttpStatusToError(response.status))
     };
   }
 
@@ -262,7 +313,7 @@ export async function safeFetchJson<T>(
     return {
       ok: false,
       status: response.status,
-      error: mapHttpStatusToError(response.status, trimmed)
+      error: enrichRateLimitError(mapHttpStatusToError(response.status, trimmed))
     };
   }
 
@@ -270,17 +321,28 @@ export async function safeFetchJson<T>(
   if (!response.ok) {
     const structured = extractStructuredError(parsed);
     if (structured) {
+      if (response.status === 429) {
+        if (!structured.retryAfterSeconds && headerRetrySeconds) {
+          structured.retryAfterSeconds = headerRetrySeconds;
+        }
+        if (rateLimitSource) {
+          structured.rateLimitSource = rateLimitSource;
+        }
+      }
       return {
         ok: false,
         status: response.status,
-        error: structured
+        error: {
+          ...structured,
+          status: response.status
+        }
       };
     }
 
     return {
       ok: false,
       status: response.status,
-      error: mapHttpStatusToError(response.status)
+      error: enrichRateLimitError(mapHttpStatusToError(response.status))
     };
   }
 
