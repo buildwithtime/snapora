@@ -370,4 +370,3 @@ describe('Duplicate Profile Submission Prevention Suite', () => {
     expect(discoverCalls).toBe(2);
   });
 });
-
