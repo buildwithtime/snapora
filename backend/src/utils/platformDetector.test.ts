@@ -189,4 +189,3 @@ describe('Modular Platform Detectors & UniversalPlatformRegistry', () => {
     });
   });
 });
-

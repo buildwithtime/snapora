@@ -161,4 +161,3 @@ describe('Frontend Modular Platform Detectors & UniversalPlatformRegistry', () =
     });
   });
 });
-
