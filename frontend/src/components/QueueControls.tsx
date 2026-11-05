@@ -11,6 +11,7 @@ export const QueueControls: React.FC = () => {
     downloadAll,
     cancelDownloadAll,
     downloadMode,
+    isCrossTabSupported,
     setDownloadMode
   } = useQueue();
 
@@ -102,6 +103,43 @@ export const QueueControls: React.FC = () => {
           >
             Concurrency: 1 (Sequential)
           </span>
+
+          {isCrossTabSupported ? (
+            <span
+              style={{
+                fontSize: '0.72rem',
+                padding: '0.15rem 0.5rem',
+                borderRadius: '10px',
+                background: 'rgba(16, 185, 129, 0.12)',
+                color: '#34d399',
+                border: '1px solid rgba(16, 185, 129, 0.25)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.25rem'
+              }}
+              title="Cross-tab rate coordination active via Web Locks API."
+            >
+              ⚡ Multi-Tab Synced
+            </span>
+          ) : (
+            <span
+              role="status"
+              style={{
+                fontSize: '0.72rem',
+                padding: '0.15rem 0.5rem',
+                borderRadius: '10px',
+                background: 'rgba(245, 158, 11, 0.12)',
+                color: '#fbbf24',
+                border: '1px solid rgba(245, 158, 11, 0.25)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.25rem'
+              }}
+              title="Web Locks API is unavailable in this browser. Requests are paced within this tab only; cross-tab rate coordination is disabled."
+            >
+              ⚠️ Single-Tab Mode
+            </span>
+          )}
 
           {totalResolvedItems > 0 && (
             <span
@@ -354,6 +392,30 @@ export const QueueControls: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Informational notice when cross-tab coordination is unavailable */}
+      {!isCrossTabSupported && (
+        <div
+          role="note"
+          aria-label="Cross-tab coordination notice"
+          style={{
+            padding: '0.5rem 0.8rem',
+            borderRadius: 'var(--radius-sm, 8px)',
+            background: 'rgba(245, 158, 11, 0.08)',
+            border: '1px solid rgba(245, 158, 11, 0.25)',
+            color: '#fbbf24',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            fontSize: '0.78rem'
+          }}
+        >
+          <span>⚠️</span>
+          <span>
+            Cross-tab rate coordination is unavailable in this browser (Web Locks API not supported). Single-tab request pacing is active; each browser tab will manage rate limits independently.
+          </span>
+        </div>
+      )}
 
       {/* Rate-Limit Cooldown Banner */}
       {isCoolingDown && (

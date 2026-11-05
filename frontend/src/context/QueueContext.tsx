@@ -37,6 +37,7 @@ interface QueueContextType {
     archivePrefix?: string
   ) => Promise<ZipResult>;
   cancelDownloadAll: () => void;
+  isCrossTabSupported: boolean;
 }
 
 const isTestMode = (import.meta as any).env?.MODE === 'test';
@@ -1253,7 +1254,8 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         downloadMediaItem,
         downloadAll,
         downloadItemsAsZip,
-        cancelDownloadAll
+        cancelDownloadAll,
+        isCrossTabSupported: schedulerRef.current?.isCrossTabSupported() ?? false
       }}
     >
       {children}

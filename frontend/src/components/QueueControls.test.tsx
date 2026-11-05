@@ -183,4 +183,50 @@ describe('QueueControls Dropdown Suite', () => {
     expect(alert.textContent).toContain(`exceeds the maximum archive limit of ${MAX_ZIP_ITEMS} files`);
     expect(alert.textContent).toContain('Download individually');
   });
+
+  it('displays Single-Tab Mode pill and notice when Web Locks API is unavailable', async () => {
+    const originalLocks = (navigator as any).locks;
+    delete (navigator as any).locks;
+
+    try {
+      render(
+        <QueueProvider>
+          <QueueControls />
+        </QueueProvider>
+      );
+
+      const statusPill = await screen.findByText('⚠️ Single-Tab Mode');
+      expect(statusPill).toBeDefined();
+
+      const note = screen.getByRole('note', { name: /Cross-tab coordination notice/i });
+      expect(note).toBeDefined();
+      expect(note.textContent).toContain('Cross-tab rate coordination is unavailable');
+    } finally {
+      (navigator as any).locks = originalLocks;
+    }
+  });
+
+  it('displays Multi-Tab Synced pill and hides notice when Web Locks API is supported', async () => {
+    const originalLocks = (navigator as any).locks;
+    (navigator as any).locks = {
+      request: vi.fn()
+    };
+
+    try {
+      render(
+        <QueueProvider>
+          <QueueControls />
+        </QueueProvider>
+      );
+
+      const statusPill = await screen.findByText('⚡ Multi-Tab Synced');
+      expect(statusPill).toBeDefined();
+
+      expect(
+        screen.queryByRole('note', { name: /Cross-tab coordination notice/i })
+      ).toBeNull();
+    } finally {
+      (navigator as any).locks = originalLocks;
+    }
+  });
 });
