@@ -1,5 +1,6 @@
 import {
   IMediaProvider,
+  PlatformId,
   ProviderCapabilities,
   ResolveResult,
   MediaItem,
@@ -25,6 +26,7 @@ export interface PublicWebProviderOptions {
 export class PublicWebMediaProvider implements IMediaProvider {
   readonly id = 'public';
   readonly name = 'Instagram Public Web Provider';
+  readonly platformId: PlatformId = 'instagram';
 
   private timeoutMs: number;
   private resilienceManager: UpstreamResilienceManager;
@@ -32,6 +34,17 @@ export class PublicWebMediaProvider implements IMediaProvider {
   constructor(options: PublicWebProviderOptions = {}) {
     this.timeoutMs = options.timeoutMs || config.resolverTimeoutMs || 15000;
     this.resilienceManager = options.resilienceManager || upstreamResilienceManager;
+  }
+
+  getAllowedDownloadHosts(): Array<string | RegExp> {
+    return [
+      'instagram.com',
+      'www.instagram.com',
+      'm.instagram.com',
+      'instagr.am',
+      /^[a-zA-Z0-9.-]+\.cdninstagram\.com$/,
+      /^[a-zA-Z0-9.-]+\.fbcdn\.net$/
+    ];
   }
 
   getCapabilities(): ProviderCapabilities {

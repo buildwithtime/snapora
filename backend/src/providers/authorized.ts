@@ -1,5 +1,6 @@
 import {
   IMediaProvider,
+  PlatformId,
   ResolveResult,
   ProviderCapabilities,
   CarouselItem,
@@ -55,6 +56,7 @@ export interface AuthorizedAccountMediaProviderOptions {
 export class AuthorizedAccountMediaProvider implements IMediaProvider {
   readonly id = 'authorized';
   readonly name = 'AuthorizedAccountMediaProvider';
+  readonly platformId: PlatformId = 'instagram';
   private userAccessToken?: string;
   private graphApiVersion: string;
   private timeoutMs: number;
@@ -65,6 +67,17 @@ export class AuthorizedAccountMediaProvider implements IMediaProvider {
     this.graphApiVersion = options?.graphApiVersion || config.instagramGraphApiVersion || 'v21.0';
     this.timeoutMs = options?.timeoutMs || config.resolverTimeoutMs || 10000;
     this.fetchFn = options?.fetchFn || fetch;
+  }
+
+  getAllowedDownloadHosts(): Array<string | RegExp> {
+    return [
+      'instagram.com',
+      'www.instagram.com',
+      'm.instagram.com',
+      'instagr.am',
+      /^[a-zA-Z0-9.-]+\.cdninstagram\.com$/,
+      /^[a-zA-Z0-9.-]+\.fbcdn\.net$/
+    ];
   }
 
   getCapabilities(): ProviderCapabilities {

@@ -1,5 +1,26 @@
 import { ErrorCode } from '../utils/errors.js';
 
+export type PlatformId =
+  | 'instagram'
+  | 'youtube'
+  | 'facebook'
+  | 'tiktok'
+  | 'pinterest'
+  | 'twitter'
+  | 'generic';
+
+export type UnifiedMediaType =
+  | 'post'
+  | 'reel'
+  | 'tv'
+  | 'profile'
+  | 'direct_media'
+  | 'image'
+  | 'video'
+  | 'carousel'
+  | 'audio'
+  | 'collection';
+
 export type ResolutionStatus =
   | 'url_validated'
   | 'live_preview_retrieved'
@@ -20,6 +41,7 @@ export type ResolutionStatus =
 export interface MediaItem {
   id?: string;
   postId?: string;
+  platform?: PlatformId;
   type: 'image' | 'video';
   url?: string;
   previewUrl?: string;
@@ -40,6 +62,7 @@ export interface MediaItem {
 export interface CarouselItem {
   id: string;
   postId?: string;
+  platform?: PlatformId;
   index: number;
   type: 'image' | 'video';
   url?: string;
@@ -75,7 +98,9 @@ export interface ResolveSuccess {
   ok: true;
   status: ResolutionStatus;
   provider: string;
+  platform?: PlatformId;
   shortcode: string;
+  contentId?: string;
   canonicalUrl: string;
   title?: string;
   author?: string;
@@ -181,6 +206,10 @@ export interface ProviderCapabilities {
   requiresAuthentication: boolean;
   requiresConfiguration: boolean;
   supportsProfileDiscovery?: boolean;
+  supportsDirectDownload?: boolean;
+  supportsCollectionExport?: boolean;
+  supportsCreatorAuth?: boolean;
+  downloadDisclaimer?: string;
 }
 
 export interface ResolveOptions {
@@ -191,9 +220,11 @@ export interface ResolveOptions {
 export interface IMediaProvider {
   readonly id: string;
   readonly name: string;
+  readonly platformId: PlatformId;
   getCapabilities(): ProviderCapabilities;
   canResolve(url: string): boolean;
   resolve(url: string, shortcode: string, options?: ResolveOptions): Promise<ResolveResult>;
   canDiscoverProfile?(urlOrUsername: string): boolean;
   discoverProfile?(urlOrUsername: string, options?: ProfileDiscoveryOptions): Promise<ProfileDiscoveryResult>;
+  getAllowedDownloadHosts(): Array<string | RegExp>;
 }

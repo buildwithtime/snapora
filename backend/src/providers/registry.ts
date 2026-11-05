@@ -1,23 +1,30 @@
-import { IMediaProvider, ProviderCapabilities, ResolveResult } from './types.js';
+import { IMediaProvider, PlatformId, ProviderCapabilities, ResolveResult } from './types.js';
 import { MockProvider } from './mock.js';
 import { InstagramOEmbedProvider } from './oembed.js';
 import { DirectMediaUrlProvider } from './direct.js';
 import { AuthorizedAccountMediaProvider } from './authorized.js';
 import { PublicWebMediaProvider } from './public.js';
 import { parseInstagramUrl } from '../utils/urlParser.js';
+import { universalPlatformRegistry, UniversalPlatformRegistry } from '../utils/platformDetector.js';
 import { config } from '../config/index.js';
 
 export interface ProviderRegistrationInfo {
   id: string;
   name: string;
+  platformId: PlatformId;
   capabilities: ProviderCapabilities;
 }
 
 export class ProviderCapabilityRegistry {
   private providers: Map<string, IMediaProvider> = new Map();
   private defaultProviderId: string = config.defaultProvider || 'public';
+  private platformRegistry: UniversalPlatformRegistry = universalPlatformRegistry;
 
-  constructor() {
+  constructor(platformRegistry?: UniversalPlatformRegistry) {
+    if (platformRegistry) {
+      this.platformRegistry = platformRegistry;
+    }
+
     // Register built-in providers
     this.register(new MockProvider());
     this.register(new InstagramOEmbedProvider());
@@ -36,6 +43,10 @@ export class ProviderCapabilityRegistry {
 
   getProvider(id: string): IMediaProvider | undefined {
     return this.providers.get(id);
+  }
+
+  getProvidersForPlatform(platformId: PlatformId): IMediaProvider[] {
+    return Array.from(this.providers.values()).filter((p) => p.platformId === platformId);
   }
 
   setDefaultProvider(id: string): void {
@@ -57,12 +68,46 @@ export class ProviderCapabilityRegistry {
     return Array.from(this.providers.values()).map((p) => ({
       id: p.id,
       name: p.name,
+      platformId: p.platformId,
       capabilities: p.getCapabilities()
     }));
   }
 
   /**
-   * Intelligently selects the best provider based on URL structure and configuration.
+   * Aggregates allowed media download hosts across all registered providers
+   * and platform detectors.
+   */
+  getAllowedDownloadHosts(): Array<string | RegExp> {
+    const rules: Array<string | RegExp> = [];
+    for (const provider of this.providers.values()) {
+      rules.push(...provider.getAllowedDownloadHosts());
+    }
+    rules.push(...this.platformRegistry.getAllowedDownloadHosts());
+    return rules;
+  }
+
+  /**
+   * Checks whether a destination hostname is authorized for media streaming/downloads.
+   * Dynamically checks rules declared by registered providers and platform detectors.
+   */
+  isAllowedDownloadHost(hostname: string): boolean {
+    const clean = hostname.toLowerCase().replace(/\.+$/, '');
+
+    // Check registered providers
+    for (const provider of this.providers.values()) {
+      const rules = provider.getAllowedDownloadHosts();
+      for (const rule of rules) {
+        if (typeof rule === 'string' && clean === rule.toLowerCase()) return true;
+        if (rule instanceof RegExp && rule.test(clean)) return true;
+      }
+    }
+
+    // Check platform registry detectors
+    return this.platformRegistry.isAllowedDownloadHost(clean);
+  }
+
+  /**
+   * Intelligently selects the best provider based on URL structure, platform detection, and configuration.
    * If a direct CDN media URL is detected, selects DirectMediaUrlProvider.
    * If an explicit preferred provider is passed, selects it.
    * Otherwise falls back to the configured default provider.
@@ -72,13 +117,25 @@ export class ProviderCapabilityRegistry {
       return this.providers.get(preferredProviderId)!;
     }
 
-    const parsed = parseInstagramUrl(url);
+    const detected = this.platformRegistry.detectPlatform(url);
 
     // If direct CDN media link, always route to DirectMediaUrlProvider
-    if (parsed.valid && parsed.contentType === 'direct_media') {
+    if (detected.matched && detected.info?.contentType === 'direct_media') {
       const directProvider = this.providers.get('direct');
       if (directProvider) {
         return directProvider;
+      }
+    }
+
+    // If a platform has providers registered, choose the active or default for that platform
+    if (detected.matched && detected.platformId) {
+      const platformProviders = this.getProvidersForPlatform(detected.platformId);
+      const defaultForPlatform = platformProviders.find((p) => p.id === this.defaultProviderId);
+      if (defaultForPlatform) {
+        return defaultForPlatform;
+      }
+      if (platformProviders.length > 0) {
+        return platformProviders[0];
       }
     }
 

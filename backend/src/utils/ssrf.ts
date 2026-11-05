@@ -1,15 +1,21 @@
 import dns from 'node:dns/promises';
 import net from 'node:net';
 import { parseInstagramUrl, ParsedInstagramUrl, isInstagramCdnHostname, EXACT_ALLOWED_WEB_HOSTS } from './urlParser.js';
+import { universalPlatformRegistry } from './platformDetector.js';
+import { PlatformId, UnifiedMediaType } from '../providers/types.js';
+
+export { parseInstagramUrl, ParsedInstagramUrl, isInstagramCdnHostname, EXACT_ALLOWED_WEB_HOSTS };
 
 export type InstagramMediaType = 'post' | 'reel' | 'tv' | 'profile' | 'direct_media';
 
 export interface ValidationResult {
   valid: boolean;
+  platform?: PlatformId;
   normalizedUrl?: string;
   shortcode?: string;
+  contentId?: string;
   username?: string;
-  mediaType?: InstagramMediaType;
+  mediaType?: InstagramMediaType | UnifiedMediaType;
   error?: string;
 }
 
@@ -188,23 +194,26 @@ export async function assertSafeDestinationHost(
 }
 
 /**
- * Validates and normalizes Instagram URLs for backend consumption.
- * Supports both web permalinks and direct Meta CDN URLs.
+ * Validates and normalizes media URLs for backend consumption.
+ * Supports web permalinks and direct CDN URLs across registered platforms.
  */
 export function validateAndSanitizeUrl(rawUrl: string): ValidationResult {
-  const res = parseInstagramUrl(rawUrl);
-  if (!res.valid || !res.canonicalUrl) {
+  const detectResult = universalPlatformRegistry.detectPlatform(rawUrl);
+  if (!detectResult.matched || detectResult.error || !detectResult.info) {
     return {
       valid: false,
-      error: res.error || 'Invalid or unsupported Instagram URL'
+      error: detectResult.error || 'Invalid or unsupported media URL'
     };
   }
 
+  const info = detectResult.info;
   return {
     valid: true,
-    normalizedUrl: res.canonicalUrl,
-    shortcode: res.shortcode || 'direct_media',
-    username: res.username,
-    mediaType: res.contentType
+    platform: info.platformId,
+    normalizedUrl: info.canonicalUrl,
+    shortcode: info.shortcode || info.contentId || 'direct_media',
+    contentId: info.contentId || info.shortcode,
+    username: info.username,
+    mediaType: info.contentType
   };
 }

@@ -1,7 +1,7 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
 import net from 'node:net';
 import { z } from 'zod';
-import { parseInstagramUrl } from '../utils/urlParser.js';
+import { providerRegistry } from '../providers/registry.js';
 import { validateMediaBytes } from '../utils/mediaValidator.js';
 import { createErrorResponse, parseRetryAfter, formatRateLimitMessage } from '../utils/errors.js';
 import { safeHttpsRequest, SafeRequestResponse } from '../utils/ssrfClient.js';
@@ -65,6 +65,27 @@ export async function downloadRoutes(app: FastifyInstance) {
         );
       }
 
+      // Reject path traversal sequences
+      if (url.includes('/../') || url.includes('/..') || url.includes('\\')) {
+        return reply.status(400).send(
+          createErrorResponse('UNSUPPORTED_URL', 'Path traversal sequences are not permitted')
+        );
+      }
+
+      // Embedded authentication credentials rejection
+      if (parsedTarget.username || parsedTarget.password) {
+        return reply.status(400).send(
+          createErrorResponse('UNSUPPORTED_URL', 'Embedded authentication credentials are not permitted')
+        );
+      }
+
+      // Disallow non-standard ports
+      if (parsedTarget.port && parsedTarget.port !== '443') {
+        return reply.status(400).send(
+          createErrorResponse('UNSUPPORTED_URL', 'Non-standard ports are prohibited')
+        );
+      }
+
       // Check literal IP address against SSRF private/loopback/cloud metadata
       const hostClean = parsedTarget.hostname.toLowerCase().replace(/\.+$/, '');
       if (net.isIP(hostClean) && isPrivateOrReservedIp(hostClean)) {
@@ -73,11 +94,10 @@ export async function downloadRoutes(app: FastifyInstance) {
         );
       }
 
-      // URL pattern validation
-      const parsed = parseInstagramUrl(url);
-      if (!parsed.valid) {
+      // Provider-aware download host validation
+      if (!providerRegistry.isAllowedDownloadHost(hostClean)) {
         return reply.status(400).send(
-          createErrorResponse('UNSUPPORTED_URL', parsed.error || 'The requested media URL is invalid')
+          createErrorResponse('UNSUPPORTED_URL', `Hostname '${hostClean}' is not in the allowed domain list`)
         );
       }
 
