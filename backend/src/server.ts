@@ -1,5 +1,6 @@
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import Fastify, { FastifyInstance } from 'fastify';
 import cors from '@fastify/cors';
@@ -21,6 +22,7 @@ export interface BuildServerOptions {
   corsOrigin?: string[] | boolean;
   rateLimitMax?: number;
   rateLimitWindowMs?: number;
+  adminApiKey?: string;
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<FastifyInstance> {
@@ -122,8 +124,42 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<Fas
   await app.register(profileRoutes, { provider: options.provider });
   await app.register(downloadRoutes);
 
-  // Aggregate operational metrics (separate from public health endpoint)
-  app.get('/api/admin/metrics', async (_request, reply) => {
+  // Operational resilience metrics (protected by administrative authentication)
+  const configuredAdminKey = options.adminApiKey ?? config.adminApiKey;
+
+  app.get('/api/admin/metrics', async (request, reply) => {
+    if (!configuredAdminKey) {
+      return reply.status(404).send(createErrorResponse('NOT_FOUND', 'API endpoint not found'));
+    }
+
+    const authHeader = request.headers['authorization'];
+    const customHeader = request.headers['x-admin-key'];
+    let providedKey: string | null = null;
+
+    if (typeof customHeader === 'string' && customHeader.trim().length > 0) {
+      providedKey = customHeader.trim();
+    } else if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+      providedKey = authHeader.slice(7).trim();
+    }
+
+    if (!providedKey) {
+      return reply.status(401).send(
+        createErrorResponse('UNAUTHORIZED', 'Administrative authentication required')
+      );
+    }
+
+    const providedBuffer = Buffer.from(providedKey, 'utf8');
+    const expectedBuffer = Buffer.from(configuredAdminKey, 'utf8');
+
+    const isMatch =
+      providedBuffer.length === expectedBuffer.length &&
+      crypto.timingSafeEqual(providedBuffer, expectedBuffer);
+
+    if (!isMatch) {
+      return reply.status(401).send(
+        createErrorResponse('UNAUTHORIZED', 'Invalid administrative credentials')
+      );
+    }
     return reply.status(200).send({
       ok: true,
       metrics: upstreamResilienceManager.getMetrics()

@@ -263,105 +263,147 @@ export const JobItem: React.FC<JobItemProps> = ({ job }) => {
 
       {/* Error state display with user-friendly actionable guidance */}
       {job.status === 'failed' && job.error && (() => {
-        const getFriendlyError = (err: { code: string; message: string }) => {
+        interface FriendlyErrorDescriptor {
+          title: string;
+          detail: string;
+          category: 'temporary' | 'restricted' | 'permanent' | 'transient';
+          tag: string;
+        }
+
+        const getFriendlyError = (err: { code: string; message: string }): FriendlyErrorDescriptor => {
           switch (err.code) {
-            case 'UNSUPPORTED_URL':
-            case 'INVALID_URL':
-              return {
-                title: 'Invalid Instagram Link',
-                detail: 'Please enter a valid public Instagram post, Reel, or carousel URL.'
-              };
-            case 'UNSUPPORTED_CONTENT':
-              return {
-                title: 'Unsupported Content',
-                detail: "This type of Instagram content isn't supported yet."
-              };
             case 'HTTP_429_RATE_LIMITED':
             case 'RATE_LIMITED':
             case 'UPSTREAM_RATE_LIMITED':
               return {
-                title: 'Temporarily Rate Limited',
-                detail: err.message || 'Instagram is temporarily limiting requests. Please wait for cooldown before retrying.'
+                title: 'Temporarily Rate Limited (Upstream Instagram)',
+                detail: err.message || 'Instagram is temporarily limiting requests from this network. The queue is automatically paused and will resume when the cooldown period expires.',
+                category: 'temporary',
+                tag: '⏳ Temporary Rate Limit'
               };
             case 'LOCAL_RATE_LIMITED':
               return {
                 title: 'Snapora Request Limit Reached',
-                detail: err.message || 'Snapora request limit reached. Please try again later.'
-              };
-            case 'TIMEOUT':
-              return {
-                title: 'Request Timed Out',
-                detail: 'The request took too long. You can try again.'
-              };
-            case 'CONTENT_UNAVAILABLE':
-            case 'METADATA_NOT_FOUND':
-            case 'NO_MEDIA':
-              return {
-                title: 'No Downloadable Media Found',
-                detail: "We couldn't extract downloadable media metadata for this post."
-              };
-            case 'EXPIRED_MEDIA_URL':
-            case 'MEDIA_URL_EXPIRED':
-              return {
-                title: 'Media URL Expired',
-                detail: 'The temporary signed download link has expired. Please retry to refresh the URL.'
-              };
-            case 'PAGE_FETCH_FAILED':
-            case 'CDN_REQUEST_FAILED':
-              return {
-                title: 'Upstream Fetch Failed',
-                detail: 'Unable to connect to Instagram or CDN servers. Please verify your network connection.'
-              };
-            case 'STREAM_INTERRUPTED':
-            case 'DOWNLOAD_INTERRUPTED':
-              return {
-                title: 'Download Interrupted',
-                detail: 'The media stream was interrupted before completion. Please retry.'
-              };
-            case 'SERVER_UNAVAILABLE':
-            case 'SERVICE_UNAVAILABLE':
-              return {
-                title: 'Service Unavailable',
-                detail: 'The upstream media service is temporarily unavailable. Please try again.'
+                detail: err.message || 'Snapora application limit reached to maintain service reliability. The queue is paused and will resume automatically.',
+                category: 'temporary',
+                tag: '⏳ Temporary Limit'
               };
             case 'CONTENT_PRIVATE':
             case 'PRIVATE_ACCOUNT':
             case 'LOGIN_WALL_ENCOUNTERED':
             case 'HTTP_403_FORBIDDEN':
               return {
-                title: 'Private or Restricted Post',
-                detail: 'This post belongs to a private account or requires an Instagram login.'
+                title: 'Private or Restricted Post (Instagram Login Required)',
+                detail: 'Instagram requires an authenticated login to access this post from cloud hosting networks. Open directly on Instagram or provide an authorized Meta access token in Advanced Options.',
+                category: 'restricted',
+                tag: '🚫 Login Required'
+              };
+            case 'UNSUPPORTED_RETRIEVAL_METHOD':
+            case 'UNSUPPORTED_CONTENT':
+              return {
+                title: 'Unsupported Content Format',
+                detail: "This type of Instagram content (e.g. Stories, Live broadcasts, or subscriber-only posts) cannot be resolved via public web access.",
+                category: 'permanent',
+                tag: '🚫 Unsupported Format'
+              };
+            case 'UNSUPPORTED_URL':
+            case 'INVALID_URL':
+              return {
+                title: 'Invalid Instagram Link',
+                detail: 'Please enter a valid public Instagram post, Reel, or carousel URL.',
+                category: 'permanent',
+                tag: '⚠️ Invalid Link'
+              };
+            case 'TIMEOUT':
+              return {
+                title: 'Request Timed Out',
+                detail: 'The request took too long. You can try again.',
+                category: 'transient',
+                tag: '⏱️ Timed Out'
+              };
+            case 'CONTENT_UNAVAILABLE':
+            case 'METADATA_NOT_FOUND':
+            case 'NO_MEDIA':
+              return {
+                title: 'No Downloadable Media Found',
+                detail: "We couldn't extract downloadable media metadata for this post.",
+                category: 'permanent',
+                tag: 'ℹ️ No Media'
+              };
+            case 'EXPIRED_MEDIA_URL':
+            case 'MEDIA_URL_EXPIRED':
+              return {
+                title: 'Media URL Expired',
+                detail: 'The temporary signed download link has expired. Please retry to refresh the URL.',
+                category: 'transient',
+                tag: '🔄 Link Expired'
+              };
+            case 'PAGE_FETCH_FAILED':
+            case 'CDN_REQUEST_FAILED':
+              return {
+                title: 'Upstream Fetch Failed',
+                detail: 'Unable to connect to Instagram or CDN servers. Please verify your network connection.',
+                category: 'transient',
+                tag: '🌐 Connection Error'
+              };
+            case 'STREAM_INTERRUPTED':
+            case 'DOWNLOAD_INTERRUPTED':
+              return {
+                title: 'Download Interrupted',
+                detail: 'The media stream was interrupted before completion. Please retry.',
+                category: 'transient',
+                tag: '⚡ Interrupted'
+              };
+            case 'SERVER_UNAVAILABLE':
+            case 'SERVICE_UNAVAILABLE':
+              return {
+                title: 'Service Unavailable',
+                detail: 'The upstream media service is temporarily unavailable. Please try again.',
+                category: 'transient',
+                tag: '⚠️ Service Down'
               };
             case 'MEDIA_VALIDATION_FAILED':
               return {
                 title: 'Media Verification Failed',
-                detail: 'The retrieved data could not be verified as a valid image or video file.'
+                detail: 'The retrieved data could not be verified as a valid image or video file.',
+                category: 'transient',
+                tag: '🛡️ Validation Failed'
               };
             case 'PROVIDER_NOT_CONFIGURED':
               return {
                 title: 'Preview Service Unavailable',
-                detail: 'The upstream preview provider is not configured.'
+                detail: 'The upstream preview provider is not configured.',
+                category: 'permanent',
+                tag: '⚙️ Unconfigured'
               };
             case 'AUTHENTICATION_REQUIRED':
             case 'AUTHENTICATION_ERROR':
               return {
                 title: 'Account Authorization Required',
-                detail: 'Access to this content requires authorized account permissions.'
+                detail: 'Access to this content requires authorized account permissions.',
+                category: 'restricted',
+                tag: '🔑 Auth Required'
               };
             case 'POST_NOT_FOUND':
               return {
                 title: 'Post Not Found',
-                detail: 'The requested post or Reel could not be found. It may have been deleted or archived.'
+                detail: 'The requested post or Reel could not be found. It may have been deleted or archived.',
+                category: 'permanent',
+                tag: '🔍 Not Found'
               };
             default:
               return {
                 title: 'Unable to Resolve Media',
-                detail: err.message || 'An unexpected error occurred while resolving this link.'
+                detail: err.message || 'An unexpected error occurred while resolving this link.',
+                category: 'transient',
+                tag: '⚠️ Error'
               };
           }
         };
 
         const friendly = getFriendlyError(job.error);
+        const isTemporary = friendly.category === 'temporary';
+        const isRestricted = friendly.category === 'restricted';
 
         return (
           <div
@@ -369,23 +411,46 @@ export const JobItem: React.FC<JobItemProps> = ({ job }) => {
             style={{
               padding: '0.85rem 1rem',
               borderRadius: 'var(--radius-sm)',
-              background: 'rgba(244, 63, 94, 0.08)',
-              border: '1px solid rgba(244, 63, 94, 0.25)',
-              color: '#fb7185',
+              background: isTemporary
+                ? 'rgba(251, 191, 36, 0.08)'
+                : isRestricted
+                ? 'rgba(244, 63, 94, 0.08)'
+                : 'rgba(148, 163, 184, 0.08)',
+              border: `1px solid ${
+                isTemporary
+                  ? 'rgba(251, 191, 36, 0.3)'
+                  : isRestricted
+                  ? 'rgba(244, 63, 94, 0.25)'
+                  : 'rgba(148, 163, 184, 0.25)'
+              }`,
+              color: isTemporary ? '#fbbf24' : isRestricted ? '#fb7185' : '#cbd5e1',
               fontSize: '0.82rem',
               display: 'flex',
               flexDirection: 'column',
               gap: '0.35rem'
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-              <span style={{ fontWeight: 700, color: '#fda4af' }}>⚠️ {friendly.title}</span>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <span style={{ fontWeight: 700, color: isTemporary ? '#fde68a' : '#fda4af' }}>⚠️ {friendly.title}</span>
+              <span
+                style={{
+                  fontSize: '0.68rem',
+                  fontWeight: 600,
+                  padding: '0.15rem 0.45rem',
+                  borderRadius: '4px',
+                  background: isTemporary ? 'rgba(251, 191, 36, 0.15)' : 'rgba(244, 63, 94, 0.15)',
+                  color: isTemporary ? '#fbbf24' : '#fda4af',
+                  border: `1px solid ${isTemporary ? 'rgba(251, 191, 36, 0.35)' : 'rgba(244, 63, 94, 0.35)'}`
+                }}
+              >
+                {friendly.tag}
+              </span>
             </div>
-            <p style={{ margin: 0, fontSize: '0.78rem', color: '#fecdd3', lineHeight: 1.4 }}>
+            <p style={{ margin: 0, fontSize: '0.78rem', color: isTemporary ? '#fef3c7' : '#fecdd3', lineHeight: 1.4 }}>
               {friendly.detail}
             </p>
             {job.error.message && job.error.message !== friendly.detail && (
-              <span style={{ fontSize: '0.74rem', color: '#fda4af', opacity: 0.9 }}>
+              <span style={{ fontSize: '0.74rem', color: isTemporary ? '#fde68a' : '#fda4af', opacity: 0.9 }}>
                 {job.error.message}
               </span>
             )}

@@ -506,23 +506,131 @@ describe('Snapora Backend API & Security Suite', () => {
     });
   });
 
-  describe('Operational Metrics Endpoint', () => {
-    it('returns operational resilience metrics at /api/admin/metrics', async () => {
-      const response = await app.inject({
-        method: 'GET',
-        url: '/api/admin/metrics'
+  describe('Operational Metrics Endpoint Security & Authentication', () => {
+    it('returns HTTP 404 when ADMIN_API_KEY is not configured', async () => {
+      const unconfiguredApp = await buildServer({
+        provider: new MockProvider(),
+        enableRateLimit: false,
+        adminApiKey: undefined
       });
-
-      expect(response.statusCode).toBe(200);
-      const json = response.json();
-      expect(json.ok).toBe(true);
-      expect(json.metrics).toBeDefined();
-      expect(typeof json.metrics.upstream429Count).toBe('number');
-      expect(typeof json.metrics.cacheHits).toBe('number');
-      expect(typeof json.metrics.cacheMisses).toBe('number');
-      expect(typeof json.metrics.cooldownShortCircuits).toBe('number');
-      expect(typeof json.metrics.deduplicatedRequests).toBe('number');
+      try {
+        const response = await unconfiguredApp.inject({
+          method: 'GET',
+          url: '/api/admin/metrics'
+        });
+        expect(response.statusCode).toBe(404);
+        const json = response.json();
+        expect(json.ok).toBe(false);
+        expect(json.error.code).toBe('NOT_FOUND');
+      } finally {
+        await unconfiguredApp.close();
+      }
     });
+
+    it('returns HTTP 401 when ADMIN_API_KEY is configured but credentials are missing', async () => {
+      const securedApp = await buildServer({
+        provider: new MockProvider(),
+        enableRateLimit: false,
+        adminApiKey: 'super-secret-admin-token-123'
+      });
+      try {
+        const response = await securedApp.inject({
+          method: 'GET',
+          url: '/api/admin/metrics'
+        });
+        expect(response.statusCode).toBe(401);
+        const json = response.json();
+        expect(json.ok).toBe(false);
+        expect(json.error.code).toBe('UNAUTHORIZED');
+        expect(json.error.message).toContain('authentication required');
+      } finally {
+        await securedApp.close();
+      }
+    });
+
+    it('returns HTTP 401 when invalid credentials are provided', async () => {
+      const securedApp = await buildServer({
+        provider: new MockProvider(),
+        enableRateLimit: false,
+        adminApiKey: 'super-secret-admin-token-123'
+      });
+      try {
+        // Test different length
+        const res1 = await securedApp.inject({
+          method: 'GET',
+          url: '/api/admin/metrics',
+          headers: {
+            authorization: 'Bearer wrong-length'
+          }
+        });
+        expect(res1.statusCode).toBe(401);
+        expect(res1.json().error.code).toBe('UNAUTHORIZED');
+
+        // Test same length but wrong content
+        const res2 = await securedApp.inject({
+          method: 'GET',
+          url: '/api/admin/metrics',
+          headers: {
+            'x-admin-key': 'super-secret-admin-token-999'
+          }
+        });
+        expect(res2.statusCode).toBe(401);
+        expect(res2.json().error.code).toBe('UNAUTHORIZED');
+      } finally {
+        await securedApp.close();
+      }
+    });
+
+    it('returns HTTP 200 with metrics when valid Bearer token is provided', async () => {
+      const securedApp = await buildServer({
+        provider: new MockProvider(),
+        enableRateLimit: false,
+        adminApiKey: 'super-secret-admin-token-123'
+      });
+      try {
+        const response = await securedApp.inject({
+          method: 'GET',
+          url: '/api/admin/metrics',
+          headers: {
+            authorization: 'Bearer super-secret-admin-token-123'
+          }
+        });
+        expect(response.statusCode).toBe(200);
+        const json = response.json();
+        expect(json.ok).toBe(true);
+        expect(json.metrics).toBeDefined();
+        expect(typeof json.metrics.upstream429Count).toBe('number');
+        expect(typeof json.metrics.cacheHits).toBe('number');
+        expect(typeof json.metrics.cacheMisses).toBe('number');
+      } finally {
+        await securedApp.close();
+      }
+    });
+
+    it('returns HTTP 200 with metrics when valid x-admin-key header is provided', async () => {
+      const securedApp = await buildServer({
+        provider: new MockProvider(),
+        enableRateLimit: false,
+        adminApiKey: 'super-secret-admin-token-123'
+      });
+      try {
+        const response = await securedApp.inject({
+          method: 'GET',
+          url: '/api/admin/metrics',
+          headers: {
+            'x-admin-key': 'super-secret-admin-token-123'
+          }
+        });
+        expect(response.statusCode).toBe(200);
+        const json = response.json();
+        expect(json.ok).toBe(true);
+        expect(json.metrics).toBeDefined();
+      } finally {
+        await securedApp.close();
+      }
+    });
+
+
   });
 
   describe('Fastify Rate Limiter Status and Error Response Handling', () => {

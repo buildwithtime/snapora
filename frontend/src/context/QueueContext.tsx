@@ -8,6 +8,7 @@ import { buildAndDownloadZip, ZipResult, MAX_ZIP_ITEMS } from '../utils/zipDownl
 import { triggerManagedBlobDownload } from '../utils/blobLifecycle.js';
 import { addRecentDownload } from '../utils/recentHistory.js';
 import { safeFetchJson } from '../utils/apiClient.js';
+import { ClientRequestScheduler } from '../utils/requestScheduler.js';
 
 export interface DownloadAllOptions {
   retryFailedOnly?: boolean;
@@ -36,13 +37,25 @@ interface QueueContextType {
     archivePrefix?: string
   ) => Promise<ZipResult>;
   cancelDownloadAll: () => void;
+  isCrossTabSupported: boolean;
 }
 
+const isTestMode = (import.meta as any).env?.MODE === 'test';
 const rawPacing = (import.meta as any).env?.VITE_QUEUE_PACING_MS;
 const parsedPacing = rawPacing !== undefined && rawPacing !== '' ? parseInt(rawPacing, 10) : NaN;
-const queuePacingMs = !isNaN(parsedPacing) && parsedPacing >= 0
+const defaultMinPacingMs = !isNaN(parsedPacing) && parsedPacing >= 0
   ? parsedPacing
-  : ((import.meta as any).env?.MODE === 'test' ? 0 : 150);
+  : (isTestMode ? 0 : 50);
+
+export function createRequestScheduler(): ClientRequestScheduler {
+  return new ClientRequestScheduler({
+    bucketCapacity: 10,
+    refillIntervalMs: isTestMode ? 0 : 2000,
+    rollingWindowMax: 28,
+    rollingWindowMs: 60000,
+    minPacingMs: defaultMinPacingMs
+  });
+}
 
 const QueueContext = createContext<QueueContextType | undefined>(undefined);
 
@@ -383,6 +396,15 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     upstreamRateLimitSource: null
   });
 
+  // Sync scheduler cooldown with queue state
+  useEffect(() => {
+    if (state.upstreamCooldownRemaining && state.upstreamCooldownRemaining > 0) {
+      schedulerRef.current?.triggerCooldown(state.upstreamCooldownRemaining);
+    } else {
+      schedulerRef.current?.clearCooldown();
+    }
+  }, [state.upstreamCooldownRemaining]);
+
   // Live Cooldown countdown timer
   useEffect(() => {
     if (!state.upstreamCooldownUntil) return;
@@ -417,6 +439,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  const schedulerRef = useRef<ClientRequestScheduler>(createRequestScheduler());
   const processingRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const lastRequestTimeRef = useRef<number>(0);
@@ -471,22 +494,11 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     (async () => {
       try {
-        if (queuePacingMs > 0 && lastRequestTimeRef.current > 0) {
-          const elapsed = Date.now() - lastRequestTimeRef.current;
-          const waitTime = queuePacingMs - elapsed;
-          if (waitTime > 0) {
-            await new Promise<void>((resolve, reject) => {
-              const timer = setTimeout(resolve, waitTime);
-              const onAbort = () => {
-                clearTimeout(timer);
-                reject(new DOMException('Aborted', 'AbortError'));
-              };
-              controller.signal.addEventListener('abort', onAbort, { once: true });
-            });
-          }
-        }
+        // Request scheduler: acquire token according to token-bucket and 28 req/60s rolling window
+        await schedulerRef.current.acquireToken(controller.signal);
 
         if (controller.signal.aborted) {
+          await schedulerRef.current.cancelPendingReservation();
           return;
         }
         if (isDemoMode) {
@@ -541,6 +553,7 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           headers['Authorization'] = `Bearer ${userAccessToken}`;
         }
 
+        await schedulerRef.current.recordRequest();
         const apiResult = await safeFetchJson<{
           ok: boolean;
           status?: ResolutionStatus;
@@ -1241,7 +1254,8 @@ export const QueueProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         downloadMediaItem,
         downloadAll,
         downloadItemsAsZip,
-        cancelDownloadAll
+        cancelDownloadAll,
+        isCrossTabSupported: schedulerRef.current?.isCrossTabSupported() ?? false
       }}
     >
       {children}
