@@ -1,3 +1,24 @@
+export type PlatformId =
+  | 'instagram'
+  | 'youtube'
+  | 'facebook'
+  | 'tiktok'
+  | 'pinterest'
+  | 'twitter'
+  | 'generic';
+
+export type UnifiedMediaType =
+  | 'post'
+  | 'reel'
+  | 'tv'
+  | 'profile'
+  | 'direct_media'
+  | 'image'
+  | 'video'
+  | 'carousel'
+  | 'audio'
+  | 'collection';
+
 export type ResolutionStatus =
   | 'url_validated'
   | 'live_preview_retrieved'
@@ -26,6 +47,7 @@ export type JobStatus =
 export interface MediaItem {
   id?: string;
   postId?: string;
+  platform?: PlatformId;
   type: 'image' | 'video';
   url: string;
   previewUrl?: string;
@@ -46,6 +68,7 @@ export interface MediaItem {
 export interface CarouselItem {
   id: string;
   postId?: string;
+  platform?: PlatformId;
   index: number;
   type: 'image' | 'video';
   url: string;
@@ -82,7 +105,9 @@ export interface QueueJob {
   url: string;
   normalizedUrl: string;
   shortcode: string;
-  mediaType?: 'post' | 'reel' | 'tv' | 'profile' | 'direct_media';
+  contentId?: string;
+  platform?: PlatformId;
+  mediaType?: 'post' | 'reel' | 'tv' | 'profile' | 'direct_media' | UnifiedMediaType;
   status: JobStatus;
   resolutionStatus?: ResolutionStatus;
   createdAt: number;
@@ -134,7 +159,7 @@ export type QueueState = {
 };
 
 export type QueueAction =
-  | { type: 'ADD_JOBS'; payload: Array<{ id?: string; url: string; normalizedUrl: string; shortcode: string; mediaType?: 'post' | 'reel' | 'tv' | 'profile' | 'direct_media' }> }
+  | { type: 'ADD_JOBS'; payload: Array<{ id?: string; url: string; normalizedUrl: string; shortcode: string; contentId?: string; platform?: PlatformId; mediaType?: 'post' | 'reel' | 'tv' | 'profile' | 'direct_media' | UnifiedMediaType }> }
   | { type: 'START_JOB'; payload: { jobId: string } }
   | {
       type: 'JOB_SUCCESS';
@@ -142,6 +167,8 @@ export type QueueAction =
         jobId: string;
         resolutionStatus?: ResolutionStatus;
         provider?: string;
+        platform?: PlatformId;
+        contentId?: string;
         downloadAvailable?: boolean;
         disclaimer?: string;
         preview?: PreviewData;

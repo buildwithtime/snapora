@@ -1,4 +1,4 @@
-import { IMediaProvider, ResolveResult, ProviderCapabilities, MediaItem } from './types.js';
+import { IMediaProvider, PlatformId, ResolveResult, ProviderCapabilities, MediaItem } from './types.js';
 import { parseInstagramUrl } from '../utils/urlParser.js';
 import { assertSafeDestinationHost } from '../utils/ssrf.js';
 import { config } from '../config/index.js';
@@ -20,6 +20,7 @@ export interface DirectMediaUrlProviderOptions {
 export class DirectMediaUrlProvider implements IMediaProvider {
   readonly id = 'direct';
   readonly name = 'DirectMediaUrlProvider';
+  readonly platformId: PlatformId = 'instagram';
   private timeoutMs: number;
   private maxResponseSizeBytes: number;
   private fetchFn: typeof fetch;
@@ -30,6 +31,13 @@ export class DirectMediaUrlProvider implements IMediaProvider {
     this.maxResponseSizeBytes = options?.maxResponseSizeBytes || config.maxResponseSizeBytes || 52428800;
     this.fetchFn = options?.fetchFn || fetch;
     this.lookupFn = options?.lookupFn;
+  }
+
+  getAllowedDownloadHosts(): Array<string | RegExp> {
+    return [
+      /^[a-zA-Z0-9.-]+\.cdninstagram\.com$/,
+      /^[a-zA-Z0-9.-]+\.fbcdn\.net$/
+    ];
   }
 
   getCapabilities(): ProviderCapabilities {

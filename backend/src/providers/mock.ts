@@ -1,5 +1,6 @@
 import {
   IMediaProvider,
+  PlatformId,
   ResolveResult,
   ProviderCapabilities,
   ProfileDiscoveryResult,
@@ -11,6 +12,18 @@ import { parseInstagramUrl } from '../utils/urlParser.js';
 export class MockProvider implements IMediaProvider {
   readonly id = 'mock';
   readonly name = 'MockProvider';
+  readonly platformId: PlatformId = 'instagram';
+
+  getAllowedDownloadHosts(): Array<string | RegExp> {
+    return [
+      'instagram.com',
+      'www.instagram.com',
+      'm.instagram.com',
+      'instagr.am',
+      /^[a-zA-Z0-9.-]+\.cdninstagram\.com$/,
+      /^[a-zA-Z0-9.-]+\.fbcdn\.net$/
+    ];
+  }
 
   getCapabilities(): ProviderCapabilities {
     return {

@@ -64,7 +64,11 @@ export function queueReducer(state: QueueState, action: QueueAction): QueueState
     case 'HYDRATE_STATE':
       return {
         ...state,
-        jobs: action.payload.jobs,
+        jobs: action.payload.jobs.map((j) => ({
+          ...j,
+          contentId: j.contentId || j.shortcode,
+          platform: j.platform || 'instagram'
+        })),
         activeJobId: null
       };
 
@@ -75,6 +79,8 @@ export function queueReducer(state: QueueState, action: QueueAction): QueueState
         url: item.url,
         normalizedUrl: item.normalizedUrl,
         shortcode: item.shortcode,
+        contentId: item.contentId || item.shortcode,
+        platform: item.platform || 'instagram',
         mediaType: item.mediaType,
         status: 'queued',
         resolutionStatus: 'url_validated',
@@ -114,6 +120,8 @@ export function queueReducer(state: QueueState, action: QueueAction): QueueState
                     ? 'live_preview_retrieved'
                     : 'media_download_available'),
                 completedAt: Date.now(),
+                platform: action.payload.platform || job.platform || 'instagram',
+                contentId: action.payload.contentId || job.contentId || job.shortcode,
                 media: action.payload.media,
                 carouselItems: action.payload.carouselItems,
                 title: action.payload.title,

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { IMediaProvider, ResolveResult, ProviderCapabilities } from './types.js';
+import { IMediaProvider, PlatformId, ResolveResult, ProviderCapabilities } from './types.js';
 import { config } from '../config/index.js';
 import { parseRetryAfter, formatRateLimitMessage } from '../utils/errors.js';
 
@@ -31,12 +31,24 @@ export interface InstagramOEmbedProviderOptions {
 export class InstagramOEmbedProvider implements IMediaProvider {
   readonly id = 'oembed';
   readonly name = 'InstagramOEmbedProvider';
+  readonly platformId: PlatformId = 'instagram';
   private appId?: string;
   private clientToken?: string;
   private accessToken?: string;
   private timeoutMs: number;
   private maxResponseSizeBytes: number;
   private fetchFn: typeof fetch;
+
+  getAllowedDownloadHosts(): Array<string | RegExp> {
+    return [
+      'instagram.com',
+      'www.instagram.com',
+      'm.instagram.com',
+      'instagr.am',
+      /^[a-zA-Z0-9.-]+\.cdninstagram\.com$/,
+      /^[a-zA-Z0-9.-]+\.fbcdn\.net$/
+    ];
+  }
 
   getCapabilities(): ProviderCapabilities {
     return {
