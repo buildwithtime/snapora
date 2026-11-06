@@ -116,7 +116,10 @@ export class YouTubeMediaProvider implements IMediaProvider {
           durationFormatted: videoData.durationFormatted,
           publishedAt: videoData.publishedAt,
           thumbnails,
-          metadataCapability: 'FULL_METADATA'
+          metadataCapability: 'FULL_METADATA',
+          isEmbeddable: videoData.isEmbeddable,
+          embeddingAllowed: videoData.embeddingAllowed,
+          embedStatus: videoData.embedStatus
         });
 
         return this.normalizer.buildResolveSuccess(normalized);
@@ -160,7 +163,10 @@ export class YouTubeMediaProvider implements IMediaProvider {
       author: oembedData.authorName,
       authorUrl: oembedData.authorUrl,
       thumbnails,
-      metadataCapability: 'BASIC_METADATA'
+      metadataCapability: 'BASIC_METADATA',
+      isEmbeddable: true,
+      embeddingAllowed: true,
+      embedStatus: 'allowed'
     });
 
     return this.normalizer.buildResolveSuccess(normalized);

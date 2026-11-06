@@ -95,6 +95,11 @@ export function purgeExpiredYouTubeMetadata<T extends Record<string, any>>(
   delete sanitized.durationFormatted;
   delete sanitized.publishedAt;
   delete sanitized.thumbnails;
+  delete sanitized.embedUrl;
+
+  sanitized.isEmbeddable = false;
+  sanitized.embeddingAllowed = false;
+  sanitized.embedStatus = 'disabled';
 
   if (sanitized.preview) {
     sanitized.preview = {
@@ -103,6 +108,9 @@ export function purgeExpiredYouTubeMetadata<T extends Record<string, any>>(
       title: '[Metadata Expired - Please Refresh]',
       isStale: true,
       metadataCapability: 'UNAVAILABLE',
+      isEmbeddable: false,
+      embeddingAllowed: false,
+      embedStatus: 'disabled',
       metadataFetchedAt: sanitized.preview.metadataFetchedAt,
       metadataExpiresAt: sanitized.preview.metadataExpiresAt
     };
@@ -114,6 +122,11 @@ export function purgeExpiredYouTubeMetadata<T extends Record<string, any>>(
 
   sanitized.isStale = true;
   sanitized.metadataCapability = 'UNAVAILABLE';
+
+  // Strictly preserve user-created workspace records
+  if (record.notes !== undefined) sanitized.notes = record.notes;
+  if (record.tags !== undefined) sanitized.tags = Array.isArray(record.tags) ? [...record.tags] : record.tags;
+  if (record.collections !== undefined) sanitized.collections = Array.isArray(record.collections) ? [...record.collections] : record.collections;
 
   return sanitized as T;
 }

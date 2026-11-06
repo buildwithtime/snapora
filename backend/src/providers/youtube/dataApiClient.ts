@@ -7,6 +7,8 @@ export interface ParsedDuration {
   durationFormatted: string;
 }
 
+export const DEFAULT_MAX_DATA_API_RESPONSE_SIZE = 1024 * 1024; // 1MB defensive limit for JSON metadata
+
 /**
  * Parses an ISO 8601 duration string (e.g. 'PT1H2M3S', 'PT4M13S', 'PT45S')
  * into total seconds and a user-friendly clock format ('HH:MM:SS' or 'MM:SS').
@@ -49,8 +51,10 @@ export interface YouTubeDataApiVideoData {
   durationSeconds: number;
   durationFormatted: string;
   thumbnails: Record<string, { url: string; width: number; height: number }>;
-  embedUrl: string;
+  embedUrl?: string;
   isEmbeddable: boolean;
+  embeddingAllowed: boolean;
+  embedStatus: 'allowed' | 'disabled' | 'unknown';
   privacyStatus: string;
 }
 
@@ -66,6 +70,11 @@ export interface YouTubeDataApiFailure {
 
 export class YouTubeDataApiClient {
   private readonly endpoint = 'https://www.googleapis.com/youtube/v3/videos';
+  readonly maxResponseSizeBytes: number;
+
+  constructor(options?: { maxResponseSizeBytes?: number }) {
+    this.maxResponseSizeBytes = options?.maxResponseSizeBytes || DEFAULT_MAX_DATA_API_RESPONSE_SIZE;
+  }
 
   /**
    * Fetches enriched metadata from YouTube Data API v3 using server-side API key.
@@ -102,18 +111,86 @@ export class YouTubeDataApiClient {
           'User-Agent': 'Snapora/0.1.0'
         },
         timeoutMs: 10000,
+        maxResponseSizeBytes: this.maxResponseSizeBytes,
         signal,
         allowedHostsValidator: (hostname) => hostname === 'www.googleapis.com'
       });
 
-      // Stream body into buffer
+      // 1. Inspect Content-Length header defensively upfront if present
+      const contentLengthHeader = response.headers['content-length'];
+      if (contentLengthHeader) {
+        const rawLen = Array.isArray(contentLengthHeader) ? contentLengthHeader[0] : contentLengthHeader;
+        const parsedLen = parseInt(rawLen, 10);
+        if (!isNaN(parsedLen) && parsedLen > this.maxResponseSizeBytes) {
+          response.stream.destroy();
+          return {
+            ok: false,
+            error: {
+              code: 'FILE_TOO_LARGE',
+              message: redactApiKey(
+                `YouTube Data API response size (${parsedLen} bytes) exceeds maximum limit (${this.maxResponseSizeBytes} bytes)`,
+                cleanKey
+              )
+            }
+          };
+        }
+      }
+
+      // 2. Stream body into buffer with real-time byte counting
       const stream = response.stream;
       const chunks: Buffer[] = [];
-      await new Promise<void>((resolve, reject) => {
-        stream.on('data', (c) => chunks.push(c));
-        stream.on('end', () => resolve());
-        stream.on('error', (err) => reject(err));
-      });
+      let totalBytes = 0;
+      let exceeded = false;
+
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const onData = (c: Buffer) => {
+            totalBytes += c.length;
+            if (totalBytes > this.maxResponseSizeBytes) {
+              exceeded = true;
+              cleanup();
+              stream.destroy();
+              reject(new Error(`RESPONSE_TOO_LARGE:${totalBytes}`));
+              return;
+            }
+            chunks.push(c);
+          };
+
+          const onEnd = () => {
+            cleanup();
+            resolve();
+          };
+
+          const onError = (err: Error) => {
+            cleanup();
+            reject(err);
+          };
+
+          const cleanup = () => {
+            stream.removeListener('data', onData);
+            stream.removeListener('end', onEnd);
+            stream.removeListener('error', onError);
+          };
+
+          stream.on('data', onData);
+          stream.on('end', onEnd);
+          stream.on('error', onError);
+        });
+      } catch (streamErr: any) {
+        if (exceeded || streamErr.message?.startsWith('RESPONSE_TOO_LARGE')) {
+          return {
+            ok: false,
+            error: {
+              code: 'FILE_TOO_LARGE',
+              message: redactApiKey(
+                `YouTube Data API response exceeded maximum allowable size of ${this.maxResponseSizeBytes} bytes`,
+                cleanKey
+              )
+            }
+          };
+        }
+        throw streamErr;
+      }
 
       const bodyText = Buffer.concat(chunks).toString('utf-8');
       let jsonPayload: any;
@@ -166,7 +243,26 @@ export class YouTubeDataApiClient {
       }
 
       const { durationSeconds, durationFormatted } = parseIsoDuration(contentDetails.duration);
-      const embedUrl = youTubeEmbedService.generateEmbedUrl(videoId);
+
+      // Handle embedding permission status
+      const embeddableRaw = status.embeddable;
+      let isEmbeddable = true;
+      let embedStatus: 'allowed' | 'disabled' | 'unknown' = 'unknown';
+
+      if (embeddableRaw === false) {
+        isEmbeddable = false;
+        embedStatus = 'disabled';
+      } else if (embeddableRaw === true) {
+        isEmbeddable = true;
+        embedStatus = 'allowed';
+      } else {
+        // Missing status.embeddable (fallback permissive while reporting unknown)
+        isEmbeddable = true;
+        embedStatus = 'unknown';
+      }
+
+      // Do NOT expose an active embed URL when embedding is disabled
+      const embedUrl = isEmbeddable ? youTubeEmbedService.generateEmbedUrl(videoId) : undefined;
 
       return {
         ok: true,
@@ -181,11 +277,25 @@ export class YouTubeDataApiClient {
           durationFormatted,
           thumbnails: snippet.thumbnails || {},
           embedUrl,
-          isEmbeddable: status.embeddable !== false,
+          isEmbeddable,
+          embeddingAllowed: isEmbeddable,
+          embedStatus,
           privacyStatus: status.privacyStatus || 'public'
         }
       };
     } catch (err: any) {
+      if (err.code === 'FILE_TOO_LARGE') {
+        return {
+          ok: false,
+          error: {
+            code: 'FILE_TOO_LARGE',
+            message: redactApiKey(
+              `YouTube Data API response exceeded maximum allowable size of ${this.maxResponseSizeBytes} bytes`,
+              cleanKey
+            )
+          }
+        };
+      }
       return {
         ok: false,
         error: mapDataApiError(err, undefined, cleanKey)

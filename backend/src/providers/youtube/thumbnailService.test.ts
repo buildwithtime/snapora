@@ -1,10 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+import { Readable } from 'node:stream';
 import {
   parseImageDimensions,
   isPlaceholderThumbnail,
+  isValidThumbnailUrl,
+  APPROVED_YOUTUBE_THUMBNAIL_HOSTS,
   youTubeThumbnailService,
   YouTubeThumbnailService
 } from './thumbnailService.js';
+import * as ssrfClient from '../../utils/ssrfClient.js';
 
 describe('YouTube Thumbnail Service & Image Validation Suite', () => {
   const service = new YouTubeThumbnailService();
@@ -35,6 +39,32 @@ describe('YouTube Thumbnail Service & Image Validation Suite', () => {
     0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
     0x00, 0x00, 0x01, 0x40, 0x00, 0x00, 0x00, 0xb4, 0x08, 0x02, 0x00, 0x00, 0x00
   ]);
+
+  describe('Host & Protocol Validation (isValidThumbnailUrl)', () => {
+    it('accepts HTTPS URLs on approved YouTube CDN hosts', () => {
+      expect(isValidThumbnailUrl('https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg')).toBe(true);
+      expect(isValidThumbnailUrl('https://img.youtube.com/vi/dQw4w9WgXcQ/maxresdefault.jpg')).toBe(true);
+    });
+
+    it('rejects unencrypted HTTP URLs', () => {
+      expect(isValidThumbnailUrl('http://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg')).toBe(false);
+      expect(isValidThumbnailUrl('http://img.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg')).toBe(false);
+    });
+
+    it('rejects unapproved hosts, webpage domains, and malicious domains', () => {
+      expect(isValidThumbnailUrl('https://youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg')).toBe(false);
+      expect(isValidThumbnailUrl('https://www.youtube.com/vi/dQw4w9WgXcQ/hqdefault.jpg')).toBe(false);
+      expect(isValidThumbnailUrl('https://evil.com/vi/dQw4w9WgXcQ/hqdefault.jpg')).toBe(false);
+      expect(isValidThumbnailUrl('https://attacker.i.ytimg.com/vi/123/hqdefault.jpg')).toBe(false);
+    });
+
+    it('handles null, undefined, and non-string inputs safely', () => {
+      expect(isValidThumbnailUrl(null)).toBe(false);
+      expect(isValidThumbnailUrl(undefined)).toBe(false);
+      expect(isValidThumbnailUrl('')).toBe(false);
+      expect(isValidThumbnailUrl('not-a-url')).toBe(false);
+    });
+  });
 
   describe('parseImageDimensions', () => {
     it('parses genuine dimensions from JPEG binary headers', () => {
@@ -118,8 +148,8 @@ describe('YouTube Thumbnail Service & Image Validation Suite', () => {
     });
   });
 
-  describe('discoverThumbnails', () => {
-    it('structures variants from Data API snippet thumbnails in descending resolution order', async () => {
+  describe('discoverThumbnails & Verification Accuracy', () => {
+    it('marks API metadata thumbnails as unverified (verified: false)', async () => {
       const dataApiSnippetThumbs = {
         maxres: { url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/maxresdefault.jpg', width: 1280, height: 720 },
         high: { url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg', width: 480, height: 360 },
@@ -131,9 +161,25 @@ describe('YouTube Thumbnail Service & Image Validation Suite', () => {
       expect(thumbs).toHaveLength(4);
       expect(thumbs[0].resolution).toBe('maxresdefault');
       expect(thumbs[0].width).toBe(1280);
-      expect(thumbs[1].resolution).toBe('hqdefault');
-      expect(thumbs[2].resolution).toBe('mqdefault');
-      expect(thumbs[3].resolution).toBe('default');
+      // Confirms Data API thumbnails are NOT marked binary-verified
+      expect(thumbs[0].verified).toBe(false);
+      expect(thumbs[1].verified).toBe(false);
+      expect(thumbs[2].verified).toBe(false);
+      expect(thumbs[3].verified).toBe(false);
+    });
+
+    it('filters out thumbnail URLs with invalid hostnames or insecure protocols from API metadata', async () => {
+      const mixedThumbs = {
+        maxres: { url: 'http://i.ytimg.com/vi/123/maxresdefault.jpg', width: 1280, height: 720 }, // insecure http
+        high: { url: 'https://attacker.com/vi/123/hqdefault.jpg', width: 480, height: 360 },       // unapproved host
+        medium: { url: 'https://i.ytimg.com/vi/123/mqdefault.jpg', width: 320, height: 180 }        // approved HTTPS
+      };
+
+      const thumbs = await service.discoverThumbnails('123', mixedThumbs);
+      expect(thumbs).toHaveLength(1);
+      expect(thumbs[0].resolution).toBe('mqdefault');
+      expect(thumbs[0].url).toBe('https://i.ytimg.com/vi/123/mqdefault.jpg');
+      expect(thumbs[0].verified).toBe(false);
     });
 
     it('safely generates standard variants without assuming maxresdefault when Data API is unavailable', async () => {
@@ -142,8 +188,41 @@ describe('YouTube Thumbnail Service & Image Validation Suite', () => {
       // Confirms maxresdefault is NOT assumed without verification
       expect(thumbs.some((t) => t.resolution === 'maxresdefault')).toBe(false);
       expect(thumbs[0].resolution).toBe('hqdefault');
+      expect(thumbs[0].verified).toBe(false);
       expect(thumbs[1].resolution).toBe('mqdefault');
       expect(thumbs[2].resolution).toBe('default');
+    });
+  });
+
+  describe('Binary Verification (probeThumbnailVariant)', () => {
+    it('marks thumbnail as verified: true only upon successful binary inspection', async () => {
+      const spy = vi.spyOn(ssrfClient, 'safeHttpsRequest').mockResolvedValueOnce({
+        statusCode: 200,
+        headers: { 'content-type': 'image/jpeg', 'content-length': String(validJpegMaxres.length) },
+        stream: Readable.from([validJpegMaxres]) as any
+      });
+
+      const probed = await service.probeThumbnailVariant('dQw4w9WgXcQ', 'maxresdefault');
+      expect(probed).not.toBeNull();
+      expect(probed?.resolution).toBe('maxresdefault');
+      expect(probed?.width).toBe(1280);
+      expect(probed?.height).toBe(720);
+      expect(probed?.verified).toBe(true);
+
+      spy.mockRestore();
+    });
+
+    it('returns null and does not verify when binary inspection detects placeholder', async () => {
+      const spy = vi.spyOn(ssrfClient, 'safeHttpsRequest').mockResolvedValueOnce({
+        statusCode: 200,
+        headers: { 'content-type': 'image/jpeg', 'content-length': String(placeholderJpeg.length) },
+        stream: Readable.from([placeholderJpeg]) as any
+      });
+
+      const probed = await service.probeThumbnailVariant('dQw4w9WgXcQ', 'maxresdefault');
+      expect(probed).toBeNull();
+
+      spy.mockRestore();
     });
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   calculateMetadataExpiration,
   isMetadataExpired,
@@ -6,6 +6,7 @@ import {
   purgeExpiredYouTubeMetadata,
   YOUTUBE_DATA_RETENTION_MS
 } from './retention.js';
+import { MetadataCache } from '../../utils/resilience.js';
 
 describe('YouTube Data Retention & 30-Day Expiration Policy Suite', () => {
   it('calculates exactly 30 days expiration window in UTC ISO format', () => {
@@ -63,9 +64,9 @@ describe('YouTube Data Retention & 30-Day Expiration Policy Suite', () => {
       contentId: 'dQw4w9WgXcQ',
       platform: 'youtube',
       createdAt: 1730000000000,
-      userNotes: 'My favorite music video',
-      userTags: ['music', 'retro'],
-      collectionId: 'col_888',
+      notes: 'User custom notes on YouTube video',
+      tags: ['music', 'retro', 'favorites'],
+      collections: ['col_888', 'col_999'],
       title: 'Rick Astley - Never Gonna Give You Up',
       description: 'Official Rick Astley video description...',
       author: 'Rick Astley',
@@ -73,12 +74,20 @@ describe('YouTube Data Retention & 30-Day Expiration Policy Suite', () => {
       durationSeconds: 213,
       durationFormatted: '03:33',
       publishedAt: '2009-10-25T06:57:33Z',
+      embedUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+      isEmbeddable: true,
+      embeddingAllowed: true,
+      embedStatus: 'allowed',
       thumbnails: [
         { resolution: 'hqdefault', url: 'https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg', width: 480, height: 360 }
       ],
       preview: {
         type: 'thumbnail',
         title: 'Rick Astley - Never Gonna Give You Up',
+        embedUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+        isEmbeddable: true,
+        embeddingAllowed: true,
+        embedStatus: 'allowed',
         metadataExpiresAt: '2026-12-01T00:00:00.000Z'
       },
       metadataExpiresAt: '2026-12-01T00:00:00.000Z'
@@ -90,6 +99,7 @@ describe('YouTube Data Retention & 30-Day Expiration Policy Suite', () => {
 
       expect(sanitized.title).toBe('Rick Astley - Never Gonna Give You Up');
       expect(sanitized.description).toBeDefined();
+      expect(sanitized.embedUrl).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
       expect(sanitized.isStale).toBeUndefined();
     });
 
@@ -104,9 +114,9 @@ describe('YouTube Data Retention & 30-Day Expiration Policy Suite', () => {
       expect(sanitized.contentId).toBe('dQw4w9WgXcQ');
       expect(sanitized.platform).toBe('youtube');
       expect(sanitized.createdAt).toBe(1730000000000);
-      expect(sanitized.userNotes).toBe('My favorite music video');
-      expect(sanitized.userTags).toEqual(['music', 'retro']);
-      expect(sanitized.collectionId).toBe('col_888');
+      expect(sanitized.notes).toBe('User custom notes on YouTube video');
+      expect(sanitized.tags).toEqual(['music', 'retro', 'favorites']);
+      expect(sanitized.collections).toEqual(['col_888', 'col_999']);
 
       // Provider-derived fields PURGED
       expect(sanitized.title).toBeUndefined();
@@ -115,12 +125,74 @@ describe('YouTube Data Retention & 30-Day Expiration Policy Suite', () => {
       expect(sanitized.authorUrl).toBeUndefined();
       expect(sanitized.durationSeconds).toBeUndefined();
       expect(sanitized.thumbnails).toBeUndefined();
+      expect(sanitized.embedUrl).toBeUndefined();
+      expect(sanitized.isEmbeddable).toBe(false);
+      expect(sanitized.embeddingAllowed).toBe(false);
+      expect(sanitized.embedStatus).toBe('disabled');
 
       // State marked as stale/expired
       expect(sanitized.isStale).toBe(true);
       expect(sanitized.metadataCapability).toBe('UNAVAILABLE');
       expect(sanitized.preview.isStale).toBe(true);
+      expect(sanitized.preview.embedUrl).toBeUndefined();
       expect(sanitized.preview.title).toContain('[Metadata Expired - Please Refresh]');
+    });
+
+    it('resets expiration timestamps to a new 30-day window upon refresh', () => {
+      const initialFetch = new Date('2026-11-01T00:00:00.000Z');
+      const initialTimestamps = calculateMetadataExpiration(initialFetch);
+      expect(initialTimestamps.metadataExpiresAt).toBe('2026-12-01T00:00:00.000Z');
+
+      // Refresh occurs 25 days later
+      const refreshFetch = new Date('2026-11-26T00:00:00.000Z');
+      const refreshedTimestamps = calculateMetadataExpiration(refreshFetch);
+      expect(refreshedTimestamps.metadataFetchedAt).toBe('2026-11-26T00:00:00.000Z');
+      expect(refreshedTimestamps.metadataExpiresAt).toBe('2026-12-26T00:00:00.000Z');
+      expect(Date.parse(refreshedTimestamps.metadataExpiresAt) > Date.parse(initialTimestamps.metadataExpiresAt)).toBe(true);
+    });
+  });
+
+  describe('MetadataCache Retention Integration', () => {
+    let cache: MetadataCache;
+
+    beforeEach(() => {
+      cache = new MetadataCache(10);
+    });
+
+    it('rejects caching records whose metadata retention has already expired', () => {
+      const expiredRecord: any = {
+        ok: true,
+        status: 'live_metadata_retrieved',
+        provider: 'youtube',
+        shortcode: '123',
+        canonicalUrl: 'https://www.youtube.com/watch?v=123',
+        metadataExpiresAt: new Date(Date.now() - 1000).toISOString() // 1 second ago
+      };
+
+      cache.set('youtube:123', expiredRecord, 'post');
+      expect(cache.get('youtube:123')).toBeNull();
+      expect(cache.size).toBe(0);
+    });
+
+    it('evicts and returns null when cached entry retention expires during storage', () => {
+      const freshRecord: any = {
+        ok: true,
+        status: 'live_metadata_retrieved',
+        provider: 'youtube',
+        shortcode: '456',
+        canonicalUrl: 'https://www.youtube.com/watch?v=456',
+        metadataExpiresAt: new Date(Date.now() + 50000).toISOString() // fresh initially
+      };
+
+      cache.set('youtube:456', freshRecord, 'post');
+      expect(cache.get('youtube:456')).not.toBeNull();
+
+      // Simulate expiration of the stored metadata
+      const entry = (cache as any).cache.get('youtube:456');
+      entry.value.metadataExpiresAt = new Date(Date.now() - 1000).toISOString();
+
+      expect(cache.get('youtube:456')).toBeNull();
+      expect(cache.size).toBe(0);
     });
   });
 });

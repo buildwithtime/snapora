@@ -38,6 +38,19 @@ export function isMediaUrlExpired(url: string, bufferSeconds = 60): boolean {
 /**
  * Checks whether any media items in a ResolveResult or ProfileDiscoveryResult have expired CDN URLs.
  */
+export function hasExpiredRetentionMetadata(result: ResolveResult | ProfileDiscoveryResult): boolean {
+  if (!result || !result.ok) return false;
+  const anyResult = result as any;
+  const expiresAt = anyResult.metadataExpiresAt || anyResult.preview?.metadataExpiresAt;
+  if (expiresAt && typeof expiresAt === 'string') {
+    const t = Date.parse(expiresAt);
+    if (!isNaN(t) && Date.now() >= t) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export function hasExpiredMediaUrls(result: ResolveResult | ProfileDiscoveryResult): boolean {
   if (!result || !result.ok) return false;
 
@@ -111,7 +124,7 @@ export class MetadataCache {
     }
 
     // Validate signed URL freshness
-    if (hasExpiredMediaUrls(entry.value)) {
+    if (hasExpiredMediaUrls(entry.value) || hasExpiredRetentionMetadata(entry.value)) {
       this.cache.delete(key);
       return null;
     }
@@ -130,7 +143,7 @@ export class MetadataCache {
     }
 
     // If media URLs are already expired, do not cache
-    if (hasExpiredMediaUrls(value)) {
+    if (hasExpiredMediaUrls(value) || hasExpiredRetentionMetadata(value)) {
       return;
     }
 

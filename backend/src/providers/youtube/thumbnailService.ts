@@ -16,6 +16,30 @@ export const YOUTUBE_THUMBNAIL_RESOLUTIONS: ReadonlyArray<YouTubeThumbnailResolu
   'default'
 ];
 
+export const APPROVED_YOUTUBE_THUMBNAIL_HOSTS = new Set([
+  'i.ytimg.com',
+  'img.youtube.com'
+]);
+
+/**
+ * Validates that a thumbnail URL uses HTTPS and points to an approved YouTube CDN host.
+ */
+export function isValidThumbnailUrl(urlStr?: string | null): boolean {
+  if (!urlStr || typeof urlStr !== 'string') {
+    return false;
+  }
+  try {
+    const parsed = new URL(urlStr);
+    if (parsed.protocol !== 'https:') {
+      return false;
+    }
+    const hostname = parsed.hostname.toLowerCase().replace(/\.+$/, '');
+    return APPROVED_YOUTUBE_THUMBNAIL_HOSTS.has(hostname);
+  } catch {
+    return false;
+  }
+}
+
 export const YOUTUBE_DEFAULT_DIMENSIONS: Record<YouTubeThumbnailResolution, { width: number; height: number }> = {
   maxresdefault: { width: 1280, height: 720 },
   sddefault: { width: 640, height: 480 },
@@ -209,6 +233,7 @@ export class YouTubeThumbnailService {
     signal?: AbortSignal
   ): Promise<YouTubeThumbnailItem | null> {
     const url = this.getThumbnailUrl(videoId, variant);
+    if (!isValidThumbnailUrl(url)) return null;
 
     try {
       const response = await safeHttpsRequest(url, {
@@ -220,7 +245,7 @@ export class YouTubeThumbnailService {
         timeoutMs: 5000,
         maxResponseSizeBytes: 5242880, // 5MB max for thumbnail probe
         signal,
-        allowedHostsValidator: (hostname) => hostname === 'i.ytimg.com' || hostname === 'img.youtube.com'
+        allowedHostsValidator: (hostname) => APPROVED_YOUTUBE_THUMBNAIL_HOSTS.has(hostname)
       });
 
       if (response.statusCode !== 200) {
@@ -309,14 +334,14 @@ export class YouTubeThumbnailService {
 
       for (const [apiKey, variant] of mapping) {
         const item = dataApiThumbnails[apiKey];
-        if (item && item.url) {
+        if (item && item.url && isValidThumbnailUrl(item.url)) {
           const dims = YOUTUBE_DEFAULT_DIMENSIONS[variant];
           results.push({
             resolution: variant,
             url: item.url,
             width: item.width || dims.width,
             height: item.height || dims.height,
-            verified: true
+            verified: false
           });
         }
       }

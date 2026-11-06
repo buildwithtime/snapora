@@ -20,6 +20,9 @@ export interface NormalizerInput {
   thumbnails: YouTubeThumbnailItem[];
   metadataCapability: YouTubeMetadataCapability;
   fetchedAt?: Date | string;
+  isEmbeddable?: boolean;
+  embeddingAllowed?: boolean;
+  embedStatus?: 'allowed' | 'disabled' | 'unknown';
 }
 
 export class YouTubeMetadataNormalizer {
@@ -28,7 +31,14 @@ export class YouTubeMetadataNormalizer {
    */
   normalize(input: NormalizerInput): NormalizedYouTubeMetadata {
     const { metadataFetchedAt, metadataExpiresAt } = calculateMetadataExpiration(input.fetchedAt);
-    const embedUrl = youTubeEmbedService.generateEmbedUrl(input.videoId);
+
+    // Explicit embedding capability determination
+    const isEmbeddable = input.isEmbeddable !== false && input.embedStatus !== 'disabled';
+    const embeddingAllowed = isEmbeddable;
+    const embedStatus = input.embedStatus || (isEmbeddable ? 'allowed' : 'disabled');
+
+    // Do NOT expose an active embed URL when embedding is disabled
+    const embedUrl = isEmbeddable ? youTubeEmbedService.generateEmbedUrl(input.videoId) : undefined;
 
     return {
       platform: 'youtube',
@@ -43,6 +53,9 @@ export class YouTubeMetadataNormalizer {
       publishedAt: input.publishedAt,
       thumbnails: input.thumbnails,
       embedUrl,
+      isEmbeddable,
+      embeddingAllowed,
+      embedStatus,
       metadataCapability: input.metadataCapability,
       metadataFetchedAt,
       metadataExpiresAt
@@ -96,6 +109,9 @@ export class YouTubeMetadataNormalizer {
       durationFormatted: normalized.durationFormatted,
       publishedAt: normalized.publishedAt,
       embedUrl: normalized.embedUrl,
+      isEmbeddable: normalized.isEmbeddable,
+      embeddingAllowed: normalized.embeddingAllowed,
+      embedStatus: normalized.embedStatus,
       metadataCapability: normalized.metadataCapability,
       metadataFetchedAt: normalized.metadataFetchedAt,
       metadataExpiresAt: normalized.metadataExpiresAt,
@@ -112,6 +128,9 @@ export class YouTubeMetadataNormalizer {
         thumbnailHeight: primaryThumb.height,
         providerName: 'YouTube',
         embedUrl: normalized.embedUrl,
+        isEmbeddable: normalized.isEmbeddable,
+        embeddingAllowed: normalized.embeddingAllowed,
+        embedStatus: normalized.embedStatus,
         description: normalized.description,
         durationSeconds: normalized.durationSeconds,
         durationFormatted: normalized.durationFormatted,

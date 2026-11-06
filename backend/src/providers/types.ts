@@ -93,6 +93,9 @@ export interface PreviewData {
   providerName?: string;
   version?: string;
   embedUrl?: string;
+  isEmbeddable?: boolean;
+  embeddingAllowed?: boolean;
+  embedStatus?: 'allowed' | 'disabled' | 'unknown';
   description?: string;
   durationSeconds?: number;
   durationFormatted?: string;
@@ -125,6 +128,9 @@ export interface ResolveSuccess {
   durationFormatted?: string;
   publishedAt?: string;
   embedUrl?: string;
+  isEmbeddable?: boolean;
+  embeddingAllowed?: boolean;
+  embedStatus?: 'allowed' | 'disabled' | 'unknown';
   metadataCapability?: 'FULL_METADATA' | 'BASIC_METADATA' | 'EMBED_ONLY' | 'UNAVAILABLE';
   metadataFetchedAt?: string;
   metadataExpiresAt?: string;

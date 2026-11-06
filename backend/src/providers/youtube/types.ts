@@ -33,7 +33,10 @@ export interface NormalizedYouTubeMetadata {
   durationFormatted?: string;
   publishedAt?: string;
   thumbnails: YouTubeThumbnailItem[];
-  embedUrl: string;
+  embedUrl?: string;
+  isEmbeddable: boolean;
+  embeddingAllowed: boolean;
+  embedStatus: 'allowed' | 'disabled' | 'unknown';
   metadataCapability: YouTubeMetadataCapability;
   metadataFetchedAt: string;
   metadataExpiresAt: string;
@@ -67,7 +70,10 @@ export interface ApiDerivedYouTubeMetadata {
   durationFormatted?: string;
   publishedAt?: string;
   thumbnails: YouTubeThumbnailItem[];
-  embedUrl: string;
+  embedUrl?: string;
+  isEmbeddable: boolean;
+  embeddingAllowed: boolean;
+  embedStatus: 'allowed' | 'disabled' | 'unknown';
   metadataCapability: YouTubeMetadataCapability;
   metadataFetchedAt: string;
   metadataExpiresAt: string;

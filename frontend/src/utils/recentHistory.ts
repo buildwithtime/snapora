@@ -1,3 +1,5 @@
+import { isMetadataExpired } from './retention.js';
+
 export interface RecentDownloadItem {
   id: string;
   url: string;
@@ -5,6 +7,9 @@ export interface RecentDownloadItem {
   author?: string;
   title?: string;
   timestamp: number;
+  metadataExpiresAt?: string;
+  platform?: string;
+  isStale?: boolean;
 }
 
 const STORAGE_KEY = 'snapora_recent_downloads';
@@ -16,7 +21,28 @@ export function getRecentDownloads(): RecentDownloadItem[] {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed)) {
-      return parsed.slice(0, MAX_HISTORY_ITEMS);
+      let modified = false;
+      const sanitized: RecentDownloadItem[] = parsed.slice(0, MAX_HISTORY_ITEMS).map((item) => {
+        // Enforce 30-day API metadata retention on cached history items
+        if (item.metadataExpiresAt && isMetadataExpired(item.metadataExpiresAt)) {
+          if (item.title || item.author) {
+            modified = true;
+          }
+          return {
+            ...item,
+            title: undefined,
+            author: undefined,
+            isStale: true
+          };
+        }
+        return item;
+      });
+
+      if (modified) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(sanitized));
+      }
+
+      return sanitized;
     }
     return [];
   } catch {
@@ -50,4 +76,3 @@ export function clearRecentDownloads(): void {
     // Ignore storage errors
   }
 }
-
