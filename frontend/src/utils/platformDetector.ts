@@ -268,11 +268,225 @@ export class InstagramPlatformDetector implements IPlatformDetector {
   }
 }
 
+
+// Exactly supported official YouTube web domains
+export const EXACT_ALLOWED_YOUTUBE_HOSTS = new Set([
+  'youtube.com',
+  'www.youtube.com',
+  'm.youtube.com',
+  'youtu.be'
+]);
+
+// Exactly supported official YouTube thumbnail CDN hosts
+export const EXACT_ALLOWED_YOUTUBE_DOWNLOAD_HOSTS = new Set([
+  'i.ytimg.com',
+  'img.youtube.com'
+]);
+
+// YouTube video ID regex: exactly 11 characters of Base64URL characters [a-zA-Z0-9_-]
+export const YOUTUBE_VIDEO_ID_REGEX = /^[a-zA-Z0-9_-]{11}$/;
+
+export class YouTubePlatformDetector implements IPlatformDetector {
+  readonly platformId: PlatformId = 'youtube';
+  readonly name = 'YouTubePlatformDetector';
+  readonly supportedHostnames: ReadonlyArray<string> = Array.from(EXACT_ALLOWED_YOUTUBE_HOSTS);
+
+  private readonly allowedDownloadRules: Array<string | RegExp> = Array.from(EXACT_ALLOWED_YOUTUBE_DOWNLOAD_HOSTS);
+
+  matches(url: URL): boolean {
+    const hostname = url.hostname.toLowerCase().replace(/\.+$/, '');
+    return EXACT_ALLOWED_YOUTUBE_HOSTS.has(hostname);
+  }
+
+  getAllowedDownloadHosts(): Array<string | RegExp> {
+    return [...this.allowedDownloadRules];
+  }
+
+  isAllowedDownloadHost(hostname: string): boolean {
+    const clean = hostname.toLowerCase().replace(/\.+$/, '');
+    return EXACT_ALLOWED_YOUTUBE_DOWNLOAD_HOSTS.has(clean);
+  }
+
+  detect(rawUrl: string, parsedUrl: URL): PlatformDetectResult {
+    const hostname = parsedUrl.hostname.toLowerCase().replace(/\.+$/, '');
+
+    if (!EXACT_ALLOWED_YOUTUBE_HOSTS.has(hostname)) {
+      return {
+        matched: false,
+        error: `Hostname '${hostname}' is not a recognized YouTube domain`
+      };
+    }
+
+    // 1. youtu.be shortlinks
+    if (hostname === 'youtu.be') {
+      const parts = parsedUrl.pathname.split('/').filter(Boolean);
+      if (parts.length === 0) {
+        return {
+          matched: true,
+          platformId: 'youtube',
+          error: 'Invalid youtu.be URL: missing video ID'
+        };
+      }
+
+      const videoId = parts[0];
+      if (!YOUTUBE_VIDEO_ID_REGEX.test(videoId)) {
+        return {
+          matched: true,
+          platformId: 'youtube',
+          error: `Invalid YouTube video ID '${videoId}'. Must be exactly 11 alphanumeric characters, underscores, or hyphens.`
+        };
+      }
+
+      return this.buildResult(rawUrl, videoId);
+    }
+
+    // 2. youtube.com, www.youtube.com, m.youtube.com
+    const cleanPath = parsedUrl.pathname.replace(/\/+$/, '') || '/';
+
+    // A. Explicitly reject playlist-only URLs
+    if (cleanPath === '/playlist' || (cleanPath !== '/watch' && parsedUrl.searchParams.has('list') && !parsedUrl.searchParams.has('v'))) {
+      return {
+        matched: true,
+        platformId: 'youtube',
+        error: 'Playlists are not supported. Please provide a direct video URL.'
+      };
+    }
+
+    // B. Explicitly reject channel / user URLs
+    if (
+      cleanPath.startsWith('/@') ||
+      cleanPath.startsWith('/channel/') ||
+      cleanPath.startsWith('/c/') ||
+      cleanPath.startsWith('/user/')
+    ) {
+      return {
+        matched: true,
+        platformId: 'youtube',
+        error: 'Channel URLs are not supported. Please provide a direct video URL.'
+      };
+    }
+
+    // C. Standard /watch?v={videoId}
+    if (cleanPath === '/watch') {
+      const videoId = parsedUrl.searchParams.get('v');
+      if (!videoId) {
+        return {
+          matched: true,
+          platformId: 'youtube',
+          error: "Invalid YouTube URL: missing 'v' video ID query parameter"
+        };
+      }
+
+      if (!YOUTUBE_VIDEO_ID_REGEX.test(videoId)) {
+        return {
+          matched: true,
+          platformId: 'youtube',
+          error: `Invalid YouTube video ID '${videoId}'. Must be exactly 11 alphanumeric characters, underscores, or hyphens.`
+        };
+      }
+
+      return this.buildResult(rawUrl, videoId);
+    }
+
+    // D. YouTube Shorts (/shorts/{videoId})
+    if (cleanPath.startsWith('/shorts/') || cleanPath === '/shorts') {
+      const match = cleanPath.match(/^\/shorts\/([a-zA-Z0-9_-]+)$/);
+      if (!match) {
+        return {
+          matched: true,
+          platformId: 'youtube',
+          error: 'Invalid YouTube Shorts URL structure'
+        };
+      }
+
+      const videoId = match[1];
+      if (!YOUTUBE_VIDEO_ID_REGEX.test(videoId)) {
+        return {
+          matched: true,
+          platformId: 'youtube',
+          error: `Invalid YouTube video ID '${videoId}'. Must be exactly 11 alphanumeric characters, underscores, or hyphens.`
+        };
+      }
+
+      return this.buildResult(rawUrl, videoId);
+    }
+
+    // E. YouTube Live (/live/{videoId})
+    if (cleanPath.startsWith('/live/') || cleanPath === '/live') {
+      const match = cleanPath.match(/^\/live\/([a-zA-Z0-9_-]+)$/);
+      if (!match) {
+        return {
+          matched: true,
+          platformId: 'youtube',
+          error: 'Invalid YouTube Live URL structure'
+        };
+      }
+
+      const videoId = match[1];
+      if (!YOUTUBE_VIDEO_ID_REGEX.test(videoId)) {
+        return {
+          matched: true,
+          platformId: 'youtube',
+          error: `Invalid YouTube video ID '${videoId}'. Must be exactly 11 alphanumeric characters, underscores, or hyphens.`
+        };
+      }
+
+      return this.buildResult(rawUrl, videoId);
+    }
+
+    // F. YouTube Embed (/embed/{videoId})
+    if (cleanPath.startsWith('/embed/') || cleanPath === '/embed') {
+      const match = cleanPath.match(/^\/embed\/([a-zA-Z0-9_-]+)$/);
+      if (!match) {
+        return {
+          matched: true,
+          platformId: 'youtube',
+          error: 'Invalid YouTube Embed URL structure'
+        };
+      }
+
+      const videoId = match[1];
+      if (!YOUTUBE_VIDEO_ID_REGEX.test(videoId)) {
+        return {
+          matched: true,
+          platformId: 'youtube',
+          error: `Invalid YouTube video ID '${videoId}'. Must be exactly 11 alphanumeric characters, underscores, or hyphens.`
+        };
+      }
+
+      return this.buildResult(rawUrl, videoId);
+    }
+
+    // G. Unrecognized paths
+    return {
+      matched: true,
+      platformId: 'youtube',
+      error: 'Unrecognized YouTube path (expected /watch?v=, youtu.be/, /shorts/, /live/, or /embed/)'
+    };
+  }
+
+  private buildResult(rawUrl: string, videoId: string): PlatformDetectResult {
+    return {
+      matched: true,
+      platformId: 'youtube',
+      info: {
+        platformId: 'youtube',
+        contentType: 'video',
+        canonicalUrl: `https://www.youtube.com/watch?v=${videoId}`,
+        originalUrl: rawUrl,
+        shortcode: videoId,
+        contentId: videoId
+      }
+    };
+  }
+}
+
 export class UniversalPlatformRegistry {
   private detectors: Map<PlatformId, IPlatformDetector> = new Map();
 
   constructor() {
     this.registerDetector(new InstagramPlatformDetector());
+    this.registerDetector(new YouTubePlatformDetector());
   }
 
   registerDetector(detector: IPlatformDetector): void {
@@ -362,7 +576,7 @@ export class UniversalPlatformRegistry {
     const hostname = parsed.hostname.toLowerCase().replace(/\.+$/, '');
     return {
       matched: false,
-      error: `Unsupported domain '${hostname}'. Only official Instagram domains (instagram.com, www.instagram.com, m.instagram.com, instagr.am) are supported.`
+      error: `Hostname '${hostname}' is not in the allowed domain list`
     };
   }
 }

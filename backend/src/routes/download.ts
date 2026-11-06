@@ -127,7 +127,8 @@ export async function downloadRoutes(app: FastifyInstance) {
           },
           timeoutMs: config.resolverTimeoutMs ? Math.max(config.resolverTimeoutMs, 30000) : 30000,
           maxResponseSizeBytes: config.maxResponseSizeBytes || 157286400,
-          signal: clientAbortController.signal
+          signal: clientAbortController.signal,
+          allowedHostsValidator: (hostname) => providerRegistry.isAllowedDownloadHost(hostname)
         });
       } catch (err: any) {
         if (err.code === 'SSRF_BLOCKED') {

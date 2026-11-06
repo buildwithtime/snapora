@@ -66,7 +66,10 @@ export function parseInstagramUrl(rawUrl: string): ParsedUrlResult {
     return {
       valid: false,
       originalUrl: rawUrl || '',
-      error: result.error || 'Invalid URL'
+      error:
+        result.error?.includes('not in the allowed domain list')
+          ? `Unsupported domain: ${result.error}`
+          : result.error || 'Invalid URL'
     };
   }
 
