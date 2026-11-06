@@ -1,8 +1,8 @@
 # SNAPORA PRODUCT & DEVELOPMENT ROADMAP
 
-**Product Vision**: **Snapora – Your Universal Media Workspace**  
-**Repository**: [buildwithtime/snapora](https://github.com/buildwithtime/snapora)  
-**Current Baseline**: `02fe82d334cf30f590e859e19315547c2d9f5783` (Phase 2 – Milestone 1 Merged)  
+**Product Vision**: **Snapora – Your Universal Media Workspace**
+**Repository**: [buildwithtime/snapora](https://github.com/buildwithtime/snapora)
+**Current Baseline**: `02fe82d334cf30f590e859e19315547c2d9f5783` (Phase 2 – Milestone 1 Merged)
 **Production Service**: `https://snapora-1r3i.onrender.com/`
 
 ---
