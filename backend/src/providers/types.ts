@@ -92,6 +92,24 @@ export interface PreviewData {
   title?: string;
   providerName?: string;
   version?: string;
+  embedUrl?: string;
+  isEmbeddable?: boolean;
+  embeddingAllowed?: boolean;
+  embedStatus?: 'allowed' | 'disabled' | 'unknown';
+  description?: string;
+  durationSeconds?: number;
+  durationFormatted?: string;
+  publishedAt?: string;
+  metadataCapability?: 'FULL_METADATA' | 'BASIC_METADATA' | 'EMBED_ONLY' | 'UNAVAILABLE';
+  metadataFetchedAt?: string;
+  metadataExpiresAt?: string;
+  thumbnails?: Array<{
+    resolution: string;
+    url: string;
+    width?: number;
+    height?: number;
+    verified?: boolean;
+  }>;
 }
 
 export interface ResolveSuccess {
@@ -104,6 +122,18 @@ export interface ResolveSuccess {
   canonicalUrl: string;
   title?: string;
   author?: string;
+  authorUrl?: string;
+  description?: string;
+  durationSeconds?: number;
+  durationFormatted?: string;
+  publishedAt?: string;
+  embedUrl?: string;
+  isEmbeddable?: boolean;
+  embeddingAllowed?: boolean;
+  embedStatus?: 'allowed' | 'disabled' | 'unknown';
+  metadataCapability?: 'FULL_METADATA' | 'BASIC_METADATA' | 'EMBED_ONLY' | 'UNAVAILABLE';
+  metadataFetchedAt?: string;
+  metadataExpiresAt?: string;
   takenAt?: number | string;
   preview?: PreviewData;
   media?: MediaItem[];

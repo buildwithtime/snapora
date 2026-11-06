@@ -4,6 +4,7 @@ import { InstagramOEmbedProvider } from './oembed.js';
 import { DirectMediaUrlProvider } from './direct.js';
 import { AuthorizedAccountMediaProvider } from './authorized.js';
 import { PublicWebMediaProvider } from './public.js';
+import { YouTubeMediaProvider } from './youtube/index.js';
 import { parseInstagramUrl } from '../utils/urlParser.js';
 import { universalPlatformRegistry, UniversalPlatformRegistry } from '../utils/platformDetector.js';
 import { config } from '../config/index.js';
@@ -31,6 +32,7 @@ export class ProviderCapabilityRegistry {
     this.register(new DirectMediaUrlProvider());
     this.register(new AuthorizedAccountMediaProvider({ userAccessToken: config.instagramUserAccessToken }));
     this.register(new PublicWebMediaProvider());
+    this.register(new YouTubeMediaProvider());
 
     if (config.defaultProvider && this.providers.has(config.defaultProvider)) {
       this.defaultProviderId = config.defaultProvider;

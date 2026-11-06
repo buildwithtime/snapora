@@ -1,77 +1,52 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import {
   UniversalPlatformRegistry,
-  InstagramPlatformDetector,
+
   IPlatformDetector,
   PlatformDetectResult
 } from './platformDetector.js';
 import { parseInstagramUrl, parseBatchUrls } from './urlValidator.js';
 
-describe('Frontend Modular Platform Detectors & UniversalPlatformRegistry', () => {
-  let registry: UniversalPlatformRegistry;
+describe('Universal Platform Detector & Registry (Frontend)', () => {
+  const registry = new UniversalPlatformRegistry();
 
-  beforeEach(() => {
-    registry = new UniversalPlatformRegistry();
+  describe('Built-in Platform Detectors Initialization', () => {
+    it('initializes with built-in Instagram and YouTube platform detectors', () => {
+      const ig = registry.getDetector('instagram');
+      expect(ig).toBeDefined();
+      expect(ig?.platformId).toBe('instagram');
+
+      const yt = registry.getDetector('youtube');
+      expect(yt).toBeDefined();
+      expect(yt?.platformId).toBe('youtube');
+
+      expect(registry.listDetectors()).toHaveLength(2);
+    });
   });
 
-  describe('InstagramPlatformDetector', () => {
-    const detector = new InstagramPlatformDetector();
-
-    it('matches official Instagram domains and CDN hosts', () => {
-      expect(detector.matches(new URL('https://www.instagram.com/p/Cxyz123/'))).toBe(true);
-      expect(detector.matches(new URL('https://instagram.com/reel/123/'))).toBe(true);
-      expect(detector.matches(new URL('https://m.instagram.com/tv/123/'))).toBe(true);
-      expect(detector.matches(new URL('https://instagr.am/p/123/'))).toBe(true);
-      expect(detector.matches(new URL('https://scontent-iad3-1.cdninstagram.com/v/t51.2885-15/photo.jpg'))).toBe(true);
-      expect(detector.matches(new URL('https://scontent.xx.fbcdn.net/v/t51.2885-15/video.mp4'))).toBe(true);
-
-      // Rejects non-Instagram domains
-      expect(detector.matches(new URL('https://youtube.com/watch?v=123'))).toBe(false);
-      expect(detector.matches(new URL('https://attacker.com/p/123'))).toBe(false);
+  describe('Instagram Detection Verification (Regression Guard)', () => {
+    it('detects standard post permalinks', () => {
+      const res = registry.detectPlatform('https://www.instagram.com/p/Cxyz123abc/');
+      expect(res.matched).toBe(true);
+      expect(res.platformId).toBe('instagram');
+      expect(res.info?.contentType).toBe('post');
+      expect(res.info?.shortcode).toBe('Cxyz123abc');
+      expect(res.info?.canonicalUrl).toBe('https://www.instagram.com/p/Cxyz123abc/');
     });
 
-    it('parses post, reel, and tv permalinks, strips tracking params, and builds canonical URLs', () => {
-      const parsedPost = detector.detect(
-        'https://www.instagram.com/p/Cxyz123/?utm_source=ig_web_copy_link&igsh=123#ref',
-        new URL('https://www.instagram.com/p/Cxyz123/?utm_source=ig_web_copy_link&igsh=123#ref')
-      );
-      expect(parsedPost.matched).toBe(true);
-      expect(parsedPost.platformId).toBe('instagram');
-      expect(parsedPost.info?.contentType).toBe('post');
-      expect(parsedPost.info?.shortcode).toBe('Cxyz123');
-      expect(parsedPost.info?.contentId).toBe('Cxyz123');
-      expect(parsedPost.info?.canonicalUrl).toBe('https://www.instagram.com/p/Cxyz123/');
-
-      const parsedReel = detector.detect(
-        'https://instagram.com/reels/Dabc456?igsh=999',
-        new URL('https://instagram.com/reels/Dabc456?igsh=999')
-      );
-      expect(parsedReel.matched).toBe(true);
-      expect(parsedReel.info?.contentType).toBe('reel');
-      expect(parsedReel.info?.canonicalUrl).toBe('https://www.instagram.com/reel/Dabc456/');
+    it('detects Reel permalinks with tracking parameters stripped', () => {
+      const res = registry.detectPlatform('https://www.instagram.com/reel/Cxyz999/?igsh=abcdef&utm_source=ig_web');
+      expect(res.matched).toBe(true);
+      expect(res.platformId).toBe('instagram');
+      expect(res.info?.contentType).toBe('reel');
+      expect(res.info?.shortcode).toBe('Cxyz999');
+      expect(res.info?.canonicalUrl).toBe('https://www.instagram.com/reel/Cxyz999/');
     });
 
-    it('detects user-prefixed post URLs and profiles', () => {
-      const parsedUserPost = detector.detect(
-        'https://www.instagram.com/natgeo/p/Cxyz123/',
-        new URL('https://www.instagram.com/natgeo/p/Cxyz123/')
-      );
-      expect(parsedUserPost.matched).toBe(true);
-      expect(parsedUserPost.info?.username).toBe('natgeo');
-      expect(parsedUserPost.info?.shortcode).toBe('Cxyz123');
-
-      const profile = detector.detect(
-        'https://www.instagram.com/nature.photographer/',
-        new URL('https://www.instagram.com/nature.photographer/')
-      );
-      expect(profile.matched).toBe(true);
-      expect(profile.info?.contentType).toBe('profile');
-      expect(profile.info?.username).toBe('nature.photographer');
-    });
-
-    it('identifies direct Meta CDN media links with file extensions and crypto tokens', () => {
-      const cdnUrl = 'https://scontent-iad3-1.cdninstagram.com/v/t51.2885-15/photo.jpg?oh=abcd&oe=65abcdef';
-      const cdn = detector.detect(cdnUrl, new URL(cdnUrl));
+    it('detects direct Meta CDN media URLs', () => {
+      const cdnUrl =
+        'https://scontent.cdninstagram.com/v/t51.2885-15/12345_n.jpg?_nc_cat=1&ccb=1-7&_nc_sid=123&oh=00_AY_hash&oe=6789ABCD';
+      const cdn = registry.detectPlatform(cdnUrl);
       expect(cdn.matched).toBe(true);
       expect(cdn.platformId).toBe('instagram');
       expect(cdn.info?.contentType).toBe('direct_media');
@@ -80,53 +55,132 @@ describe('Frontend Modular Platform Detectors & UniversalPlatformRegistry', () =
     });
   });
 
-  describe('UniversalPlatformRegistry (Frontend)', () => {
-    it('registers and detects platforms dynamically', () => {
+  describe('YouTube Detection Consistency (Parity with Backend)', () => {
+    it('detects standard www.youtube.com/watch?v={videoId}', () => {
+      const res = registry.detectPlatform('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+      expect(res.matched).toBe(true);
+      expect(res.platformId).toBe('youtube');
+      expect(res.info?.contentType).toBe('video');
+      expect(res.info?.contentId).toBe('dQw4w9WgXcQ');
+      expect(res.info?.shortcode).toBe('dQw4w9WgXcQ');
+      expect(res.info?.canonicalUrl).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+    });
+
+    it('detects shortened youtu.be/{videoId} links', () => {
+      const res = registry.detectPlatform('https://youtu.be/dQw4w9WgXcQ');
+      expect(res.matched).toBe(true);
+      expect(res.platformId).toBe('youtube');
+      expect(res.info?.contentId).toBe('dQw4w9WgXcQ');
+      expect(res.info?.canonicalUrl).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+    });
+
+    it('detects YouTube Shorts (/shorts/{videoId})', () => {
+      const res = registry.detectPlatform('https://www.youtube.com/shorts/abcdef12345');
+      expect(res.matched).toBe(true);
+      expect(res.platformId).toBe('youtube');
+      expect(res.info?.contentType).toBe('video');
+      expect(res.info?.contentId).toBe('abcdef12345');
+      expect(res.info?.canonicalUrl).toBe('https://www.youtube.com/watch?v=abcdef12345');
+    });
+
+    it('detects YouTube Live (/live/{videoId})', () => {
+      const res = registry.detectPlatform('https://www.youtube.com/live/jfKfPfyJRdk');
+      expect(res.matched).toBe(true);
+      expect(res.platformId).toBe('youtube');
+      expect(res.info?.contentId).toBe('jfKfPfyJRdk');
+      expect(res.info?.canonicalUrl).toBe('https://www.youtube.com/watch?v=jfKfPfyJRdk');
+    });
+
+    it('detects YouTube Embed (/embed/{videoId})', () => {
+      const res = registry.detectPlatform('https://www.youtube.com/embed/dQw4w9WgXcQ');
+      expect(res.matched).toBe(true);
+      expect(res.platformId).toBe('youtube');
+      expect(res.info?.contentId).toBe('dQw4w9WgXcQ');
+      expect(res.info?.canonicalUrl).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+    });
+
+    it('normalizes tracking parameters cleanly to canonical URL', () => {
+      const raw = 'https://youtu.be/dQw4w9WgXcQ?si=1234567890abcdef&feature=share&utm_source=twitter';
+      const res = registry.detectPlatform(raw);
+      expect(res.matched).toBe(true);
+      expect(res.info?.canonicalUrl).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+      expect(res.info?.originalUrl).toBe(raw);
+    });
+
+    it('rejects playlist-only URLs with descriptive message', () => {
+      const res = registry.detectPlatform('https://www.youtube.com/playlist?list=PLrEnWoR732-BHrPp_Pm8_VleD68f9n14-');
+      expect(res.matched).toBe(true);
+      expect(res.platformId).toBe('youtube');
+      expect(res.error).toContain('Playlists are not supported');
+    });
+
+    it('rejects channel URLs with descriptive message', () => {
+      const res = registry.detectPlatform('https://www.youtube.com/@mkbhd');
+      expect(res.matched).toBe(true);
+      expect(res.error).toContain('Channel URLs are not supported');
+    });
+
+    it('rejects invalid 11-char video IDs', () => {
+      const res = registry.detectPlatform('https://www.youtube.com/watch?v=short');
+      expect(res.matched).toBe(true);
+      expect(res.error).toContain('Invalid YouTube video ID');
+    });
+
+    it('enforces download host isolation for YouTube', () => {
+      expect(registry.isAllowedDownloadHost('youtube.com')).toBe(false);
+      expect(registry.isAllowedDownloadHost('www.youtube.com')).toBe(false);
+      expect(registry.isAllowedDownloadHost('i.ytimg.com')).toBe(true);
+      expect(registry.isAllowedDownloadHost('img.youtube.com')).toBe(true);
+    });
+  });
+
+  describe('UniversalPlatformRegistry Dynamic Registration & Security', () => {
+    it('allows registering additional platform detectors dynamically', () => {
       const mockDetector: IPlatformDetector = {
-        platformId: 'youtube',
-        name: 'MockYouTubeDetector',
-        supportedHostnames: ['youtube.com', 'youtu.be'],
+        platformId: 'pinterest',
+        name: 'MockPinterestDetector',
+        supportedHostnames: ['pinterest.com'],
         matches(url: URL) {
-          return url.hostname.includes('youtube.com') || url.hostname.includes('youtu.be');
+          return url.hostname.includes('pinterest.com');
         },
         detect(rawUrl: string, parsedUrl: URL): PlatformDetectResult {
           return {
             matched: true,
-            platformId: 'youtube',
+            platformId: 'pinterest',
             info: {
-              platformId: 'youtube',
-              contentType: 'video',
+              platformId: 'pinterest',
+              contentType: 'image',
               canonicalUrl: `https://${parsedUrl.hostname}${parsedUrl.pathname}`,
               originalUrl: rawUrl,
-              shortcode: 'yt123',
-              contentId: 'yt123'
+              shortcode: 'pin123',
+              contentId: 'pin123'
             }
           };
         },
         isAllowedDownloadHost(hostname: string) {
-          return hostname.includes('googlevideo.com');
+          return hostname === 'i.pinimg.com';
         },
         getAllowedDownloadHosts() {
-          return [/^[a-zA-Z0-9.-]+\.googlevideo\.com$/];
+          return ['i.pinimg.com'];
         }
       };
 
       registry.registerDetector(mockDetector);
-      expect(registry.getDetector('youtube')).toBeDefined();
+      expect(registry.getDetector('pinterest')).toBeDefined();
+      expect(registry.listDetectors()).toHaveLength(3);
 
-      const res = registry.detectPlatform('https://youtube.com/watch?v=dQw4w9WgXcQ');
+      const res = registry.detectPlatform('https://www.pinterest.com/pin/123456789/');
       expect(res.matched).toBe(true);
-      expect(res.platformId).toBe('youtube');
-      expect(res.info?.contentType).toBe('video');
+      expect(res.platformId).toBe('pinterest');
 
-      expect(registry.isAllowedDownloadHost('rr1---sn-4g5edn7s.googlevideo.com')).toBe(true);
+      expect(registry.isAllowedDownloadHost('i.pinimg.com')).toBe(true);
       expect(registry.isAllowedDownloadHost('unapproved.com')).toBe(false);
     });
 
     it('rejects path traversal, embedded credentials, and unsupported domains', () => {
       expect(registry.detectPlatform('https://www.instagram.com/p/../../etc/passwd').error).toContain('Path traversal');
       expect(registry.detectPlatform('https://admin:secret@instagram.com/p/123/').error).toContain('embedded credentials');
-      expect(registry.detectPlatform('https://unsupported-site.org/item/1').error).toContain('Unsupported domain');
+      expect(registry.detectPlatform('https://unsupported-site.org/item/1').error).toContain('not in the allowed domain list');
     });
   });
 

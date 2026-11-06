@@ -1,8 +1,25 @@
 # MEDIA PROVIDER STATUS & OFFICIAL API ARCHITECTURE — SNAPORA
 
-## 1. Provider Implementations
+## 1. Universal Provider Ecosystem Overview
 
-Snapora implements a modular provider interface (`IMediaProvider` in `backend/src/providers/types.ts`) supporting two operational modes:
+Snapora utilizes a universal, decoupled provider architecture (`UniversalPlatformRegistry`, `IMediaProvider`, `IPlatformDetector`, `ProviderCapabilities`) to support multi-platform media discovery, metadata extraction, and authorized asset management.
+
+### Provider Status Matrix
+
+| Platform | Milestone | Status | Supported Features | Features On Hold / Prohibited |
+| :--- | :--- | :--- | :--- | :--- |
+| **Instagram** | Baseline / M1 | **`ACTIVE`** (Production) | Posts (`/p/`), Reels (`/reel/`), Carousels, Profile Discovery, Rate-Limit Resilience | ⏸️ Profile-wide bulk ZIP download, infinite pagination |
+| **YouTube** | Phase 2 – M2 | **`PLANNING`** (Spec Ready) | Video & Shorts metadata, multi-res thumbnails, embed player, JSON export | 🚫 Stream ripping, video download, DRM bypass |
+| **Pinterest** | Phase 2 – M3 | **`PLANNED`** | Public Pin discovery, original image archiving, board metadata | 🚫 Scraping private boards, auth bypass |
+| **TikTok** | Phase 2 – M4 | **`PLANNED`** | Public video discovery, cover art, author metadata, official embed player | 🚫 Watermark removal, stream scraping |
+| **Facebook** | Phase 2 – M5 | **`PLANNED`** | Public posts & Facebook Watch embeds via Graph API v21.0 | 🚫 Session scraping, private group bypass |
+| **X (Twitter)** | Phase 2 – M6 | **`PLANNED`** | Tweet embeds, author attribution, public media attachments | 🚫 Firehose scraping, login wall bypass |
+
+---
+
+## 2. Active Provider Implementations: Instagram
+
+Snapora implements a modular Instagram provider supporting two operational modes:
 
 ### A. Deterministic `MockProvider` (`backend/src/providers/mock.ts`)
 * **Default Mode**: Used when `DEFAULT_PROVIDER=mock` or in client-side standalone Demo Mode (`VITE_DEMO_MODE=true`).
@@ -20,9 +37,20 @@ Snapora implements a modular provider interface (`IMediaProvider` in `backend/sr
 * **Purpose**: Retrieves official public preview metadata, author handle, post title, iframe embed code, and thumbnail image directly from Meta's Graph API.
 * **Backend Credentials**: Uses Meta App ID and Client Token (`INSTAGRAM_APP_ID`, `INSTAGRAM_CLIENT_TOKEN`) strictly on the backend. No credentials are ever exposed to the client.
 
+### C. Preserved Instagram Scope (Zero Regressions Contract)
+* **Single Posts**: `/p/{shortcode}/` image and video resolution.
+* **Reels**: `/reel/{shortcode}/` and `/reels/{shortcode}/` resolution.
+* **Carousels**: Multi-slide traversal, per-slide thumbnailing, and individual item downloads.
+* **Profile Discovery**: Ingesting creator metadata, avatar preview, and post grid items.
+* **Queue & Scheduler**: Concurrency=1 sequential execution, exponential backoff, and 429 Retry-After handling.
+
+### D. Instagram Scope on Hold
+* **Profile-wide bulk downloading**: Bulk ZIP packaging across full user profile grids is paused.
+* **Profile pagination enhancements**: Multi-page cursor traversal is deferred to prioritize multi-platform breadth.
+
 ---
 
-## 2. Meta Developer Setup Guide for Live Previews
+## 3. Meta Developer Setup Guide for Live Previews
 
 To enable official live Instagram previews in Snapora:
 
@@ -54,90 +82,67 @@ To enable official live Instagram previews in Snapora:
 
 ---
 
-## 3. Official API Field Mapping & Limitations
+## 4. Upcoming Provider Specifications: YouTube (Milestone 2)
 
-### Supported Content Types
-* Instagram Posts (`/p/{shortcode}/`)
-* Instagram Reels (`/reel/{shortcode}/`, `/reels/{shortcode}/`)
-* Instagram TV (`/tv/{shortcode}/`)
+### A. Provider Decomposition
+The upcoming `YouTubeMediaProvider` will be implemented as a unified provider facade orchestrating internal specialized services:
+* `YouTubeUrlParser`: Handles `watch?v=`, `youtu.be/`, `/shorts/`, `/live/`, `/embed/`.
+* `YouTubeOEmbedClient`: Retrieves zero-auth titles, author names, thumbnail URLs, and official iframe HTML.
+* `YouTubeDataApiClient`: Optional API key enrichment for descriptions, upload dates, and high-fidelity metadata.
+* `YouTubeThumbnailService`: Probes multi-resolution variants (`maxresdefault`, `sddefault`, `hqdefault`, `mqdefault`, `default`) with HTTP HEAD dimension validation.
+* `YouTubeEmbedService`: Generates privacy-enhanced (`www.youtube-nocookie.com`) iframe embeds.
 
-### Available Metadata Fields
-| Field Name | Type | Description |
-| :--- | :--- | :--- |
-| `author_name` | `string` | Display name or handle of the Instagram author |
-| `author_url` | `string` | Link to the author's Instagram profile |
-| `title` | `string` | Caption text or title summary of the post |
-| `html` | `string` | Official Instagram embed blockquote snippet |
-| `thumbnail_url` | `string` | Direct URL to image thumbnail |
-| `thumbnail_width` | `number` | Width of the thumbnail in pixels |
-| `thumbnail_height`| `number` | Height of the thumbnail in pixels |
-| `provider_name` | `string` | Always `"Instagram"` |
-
-### API Limitations & Classified Statuses
-* **No Raw Media Streams**: Meta's oEmbed API explicitly does **not** provide downloadable MP4 video files or high-resolution carousel files.
-* **Content Eligibility**: Only public posts with third-party embedding enabled can be retrieved.
-* **Classified Errors**:
-  * `PROVIDER_NOT_CONFIGURED`: Missing Meta credentials in backend `.env`.
-  * `CONTENT_PRIVATE`: Account is private or embedding is disabled by the creator.
-  * `CONTENT_UNAVAILABLE`: Post deleted or shortcode not found (HTTP 404).
-  * `RATE_LIMITED`: Meta API rate limit exceeded (HTTP 429).
-  * `AUTHENTICATION_ERROR`: Invalid or expired Meta access token.
+### B. YouTube Compliance & Retention Guardrails
+* **30-Day API Data Retention**: Non-authorized API data stored in IndexedDB must expire or refresh after 30 days.
+* **Strict Non-Circumvention**: No extraction of video streams (MP4/WebM) or audio files; direct CDN thumbnail access and JSON metadata export only.
+* **Gated Fallback**: oEmbed fallback is restricted to approved error categories (e.g., quota exhaustion, key misconfiguration), never masking private or deleted content.
 
 ---
 
-## 4. Separation of Preview vs. Media Downloading
+## 5. Separation of Preview vs. Media Downloading
 
-Snapora enforces a strict architectural boundary between preview retrieval and file downloading:
+Snapora enforces a strict architectural boundary between preview retrieval and file downloading across all platforms:
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│                   Instagram URL                        │
+│                   Input Media URL                      │
 └──────────────────────────┬─────────────────────────────┘
+                           │
+                 [Platform Detection]
                            │
                  [URL Normalization]
                            │
                            ▼
 ┌────────────────────────────────────────────────────────┐
-│              Official Live Preview Mode                │
-│             (Meta Graph API oEmbed v21.0)              │
+│               Official Live Preview Mode               │
+│          (Official Platform APIs & oEmbed)             │
 │                                                        │
-│  ✓ Post Author & Profile Link                          │
-│  ✓ Caption Snippet & Title                             │
-│  ✓ Official Embed Blockquote                           │
-│  ✓ Preview Thumbnail Image                             │
+│  ✓ Post / Content Author & Canonical URL               │
+│  ✓ Caption Snippet & Full Metadata                     │
+│  ✓ Official Embed Player / Iframe                      │
+│  ✓ High-Resolution Thumbnails & Preview Images         │
 │                                                        │
-│  ✗ Raw Video (MP4) Stream (Not provided by Meta)       │
-│  ✗ High-Res Carousel Images (Not provided by Meta)     │
+│  ✗ DRM-Protected Video Streams                         │
+│  ✗ Third-Party Stream Ripping / Scraping               │
 └────────────────────────────────────────────────────────┘
 ```
 
 When a live preview is retrieved:
 * `status` transitions to `preview_ready` (`live_preview_retrieved`).
-* `downloadAvailable` is set to `false`.
-* The UI renders an **Official Live Preview Card** with the thumbnail, author, and external link.
-* **No misleading "Download Video/Photo" button is rendered**.
+* `downloadAvailable` reflects whether permitted direct media assets (e.g. thumbnails or authorized user media) exist.
+* The UI renders an **Official Live Preview Card** with rich metadata and official embeds.
+* **No misleading "Download Video" button is rendered for stream-protected platforms**.
 
 ---
 
-## 5. Authorized Download Pathways
+## 6. Prohibited Pathways & Security Standards
 
-For scenarios where raw media download is required:
+To preserve open-source integrity, user security, and platform compliance:
+1. **SSRF Hardening**: Download and preview proxy requests undergo pre-flight DNS resolution and IP allowlist validation, blocking private (RFC1918), loopback, link-local, and cloud metadata (`169.254.169.254`) addresses.
+2. **No Credential Harvesting**: Snapora never collects, stores, or transmits user session cookies, platform passwords, or unauthorized session tokens.
+3. **No DRM or Access Control Bypasses**: Snapora will never implement tools or methods designed to circumvent DRM, digital signatures, anti-bot mechanisms, or private account privacy walls.
+4. **Transparent Demonstration Mode**: All simulated responses remain clearly marked with user-facing disclaimers and badges.
 
-1. **Authorized Graph API User Media (`/me/media`)**:
-   * For accounts owned or managed by an authenticated user, the Instagram Graph API provides temporary direct `media_url` streams.
-   * Requires user OAuth login with `instagram_basic` and Facebook Page management permissions.
-2. **User-Supplied Direct Media**:
-   * Users can supply direct media URLs that they have legal authority and authorization to access.
-3. **Local Media File Selection**:
-   * Local file selection in the browser for storage and queue processing.
+---
 
-### Prohibited Pathways (Defense Against Abuse)
-* Unauthenticated web scraping or anti-bot bypasses.
-* Storing or harvesting Instagram user session cookies.
-* Private account bypasses without authorization.
-* Undocumented private API reverse-engineering.
-
-To ensure open-source integrity:
-1. All demonstration fixtures must remain clearly labelled.
-2. The UI footer ([SecurityBanner.tsx](../frontend/src/components/SecurityBanner.tsx)) clearly articulates the zero-credential model and the simulation nature of the demo mode.
-3. No simulated response should be represented to users as a live platform crawl.
+*Last updated: 2026-11-06 (Post-Milestone 1 Merge)*

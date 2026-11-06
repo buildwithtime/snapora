@@ -1,5 +1,6 @@
 import { openDB, DBSchema, IDBPDatabase } from 'idb';
 import { QueueJob } from '../types/queue.js';
+import { purgeExpiredJobMetadata } from './retention.js';
 
 interface SnaporaDB extends DBSchema {
   jobs: {
@@ -43,11 +44,29 @@ export async function saveJobsToStorage(jobs: QueueJob[]): Promise<void> {
   }
 }
 
+/**
+ * Loads persisted jobs from IndexedDB, automatically enforcing the 30-day API data retention policy
+ * by purging expired API-derived metadata while strictly preserving all user-created workspace records.
+ */
 export async function loadJobsFromStorage(): Promise<QueueJob[]> {
   try {
     const db = await getDb();
     const jobs = await db.getAllFromIndex('jobs', 'by-created');
-    return jobs;
+    let anyPurged = false;
+
+    const sanitizedJobs = jobs.map((job) => {
+      const purged = purgeExpiredJobMetadata(job);
+      if (purged !== job && (job.title || job.preview?.title !== '[Metadata Expired - Please Refresh]')) {
+        anyPurged = true;
+      }
+      return purged;
+    });
+
+    if (anyPurged) {
+      await saveJobsToStorage(sanitizedJobs);
+    }
+
+    return sanitizedJobs;
   } catch (err) {
     console.warn('Failed to load jobs from IndexedDB:', err);
     return [];
