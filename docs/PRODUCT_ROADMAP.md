@@ -2,7 +2,7 @@
 
 **Product Vision**: **Snapora – Your Universal Media Workspace**
 **Repository**: [buildwithtime/snapora](https://github.com/buildwithtime/snapora)
-**Current Baseline**: `02fe82d334cf30f590e859e19315547c2d9f5783` (Phase 2 – Milestone 1 Merged)
+**Current Baseline**: `d7e78431292aa1f8df21c9ca2cbbcb0b9d65abd8` (Phase 2 – Milestone 2a Merged, M2b Branch Active)
 **Production Service**: `https://snapora-1r3i.onrender.com/`
 
 ---
@@ -53,7 +53,7 @@ The existing, hardened Instagram engine remains fully active, supported, and pro
 │ Priority        │ Milestone & Platform Focus                      │ Status     │
 ├─────────────────┼─────────────────────────────────────────────────┼────────────┤
 │ Milestone 1     │ Universal Provider & Type Abstraction           │ ✅ Merged  │
-│ Milestone 2 (1) │ YouTube – Metadata & Thumbnail Workspace        │ 🟡 Spec OK │
+│ Milestone 2 (1) │ YouTube – Metadata & Thumbnail Workspace        │ 🟢 Implemented (M2a Merged, M2b UI) │
 │ Milestone 3 (2) │ Pinterest – Public Pin Discovery & Archiving    │ ⚪ Planned │
 │ Milestone 4 (3) │ TikTok – Public Discovery & Permitted Embeds    │ ⚪ Planned │
 │ Milestone 5 (4) │ Facebook – Official API & Public Media Preview  │ ⚪ Planned │
@@ -96,20 +96,27 @@ The existing, hardened Instagram engine remains fully active, supported, and pro
 ---
 
 #### Milestone 2: YouTube – Metadata & Thumbnail Workspace
-* **Status**: 🟡 **Technical Planning & Specification Complete** (Ready for Feature Branch)
-* **Target Objective**: Introduce compliant YouTube video discovery, metadata extraction, multi-resolution thumbnail access, and official embedded playback.
+* **Status**: 🟢 **Implemented** (M2a Backend Core Merged in PR #19; M2b Frontend Workspace Complete on `feature/youtube-workspace-ui`)
+* **Target Objective**: Introduce compliant YouTube video discovery, metadata extraction, multi-resolution thumbnail access, privacy-enhanced playback, and workspace organization.
 * **Key Components**:
-  1. `YouTubePlatformDetector`: Deterministic parsing of `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/shorts/`, `youtube.com/live/`, and `youtube.com/embed/`.
-  2. `YouTubeMediaProvider`: Unified facade orchestrating modular sub-services:
+  1. `YouTubePlatformDetector`: Deterministic parsing of `youtube.com/watch?v=`, `youtu.be/`, `youtube.com/shorts/`, `youtube.com/live/`, and `youtube.com/embed/`. Rejects playlists and channel URLs.
+  2. `YouTubeMediaProvider`: Unified backend facade orchestrating modular sub-services:
      * `YouTubeUrlParser`: Canonical 11-character video ID validation.
      * `YouTubeOEmbedClient`: Zero-auth metadata ingestion (title, author, thumbnail, iframe embed code).
      * `YouTubeDataApiClient`: Optional authenticated enrichment (description, tags, durations, views).
-     * `YouTubeThumbnailService`: Multi-resolution thumbnail resolution (`maxresdefault`, `sddefault`, `hqdefault`, `mqdefault`, `default`) with HTTP HEAD dimension verification (rejecting 120x90 placeholder responses).
+     * `YouTubeThumbnailService`: Multi-resolution thumbnail resolution (`maxresdefault`, `sddefault`, `hqdefault`, `mqdefault`, `default`) with HTTP HEAD dimension verification.
      * `YouTubeEmbedService`: Privacy-enhanced (`www.youtube-nocookie.com`) iframe generation.
-  3. **Data Retention & Expiration**: 30-day strict purge/refresh policy for YouTube API-derived data in browser IndexedDB, honoring YouTube Developer Policies.
-  4. **API Error Classification**: Granular taxonomy distinguishing `QUOTA_EXCEEDED`, `INVALID_API_KEY`, `VIDEO_NOT_FOUND`, `EMBEDDING_DISABLED`, and `TRANSIENT_FAILURE` (only falling back to oEmbed on approved classes).
-  5. **SSRF Provider Configuration**: Whitelist `i.ytimg.com`, `img.youtube.com`, `www.youtube.com`, `youtube.com`.
-  6. **Legal & Compliance Guardrail**: Direct thumbnail CDN links and metadata JSON export only; zero third-party video downloading or stream ripping.
+  3. `YouTubeWorkspace` Frontend Suite (`frontend/src/features/youtube/`):
+     * `YouTubeUrlInput`: Live format detection, auto-paste, clear, validation alerts, and cancellation.
+     * `YouTubeVideoPreview`: Privacy-enhanced player respecting `allowed`, `disabled`, and `unknown` embedding states.
+     * `YouTubeMetadataCard`: Title, channel link, duration, 30-day retention countdown, JSON export, and user notes/tags editor.
+     * `YouTubeThumbnailGallery`: Responsive grid of verified and discovered thumbnails with direct CDN links.
+     * `YouTubeHistory`: Local workspace history with reopen, refresh, delete, and retention status.
+  4. **Data Retention & Expiration**: 30-day strict purge/refresh lifecycle for YouTube API-derived data in browser IndexedDB, honoring YouTube Developer Policies while preserving user notes and tags.
+  5. **API Error Classification**: Granular taxonomy distinguishing `QUOTA_EXCEEDED`, `INVALID_API_KEY`, `VIDEO_NOT_FOUND`, `EMBEDDING_DISABLED`, and `TRANSIENT_FAILURE`.
+  6. **SSRF Provider Configuration**: Whitelist `i.ytimg.com`, `img.youtube.com`, `www.youtube.com`, `youtube.com`.
+  7. **Legal & Compliance Guardrail**: Direct thumbnail CDN links and metadata JSON export only; zero third-party video downloading or stream ripping.
+  8. **Testing Status**: 576 automated tests passing (249 frontend + 327 backend) with clean CI runs on Node 22 and 24.
 
 ---
 

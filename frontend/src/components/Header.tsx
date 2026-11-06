@@ -66,7 +66,7 @@ export const Header: React.FC = () => {
             </h1>
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.88rem', margin: '0.2rem 0 0 0' }}>
-            Privacy-first media queue for accessible public Instagram posts & carousels
+            Your Universal Media Workspace • Privacy-first media discovery &amp; management
           </p>
         </div>
       </a>

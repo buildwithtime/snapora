@@ -9,7 +9,7 @@ Snapora utilizes a universal, decoupled provider architecture (`UniversalPlatfor
 | Platform | Milestone | Status | Supported Features | Features On Hold / Prohibited |
 | :--- | :--- | :--- | :--- | :--- |
 | **Instagram** | Baseline / M1 | **`ACTIVE`** (Production) | Posts (`/p/`), Reels (`/reel/`), Carousels, Profile Discovery, Rate-Limit Resilience | ⏸️ Profile-wide bulk ZIP download, infinite pagination |
-| **YouTube** | Phase 2 – M2 | **`PLANNING`** (Spec Ready) | Video & Shorts metadata, multi-res thumbnails, embed player, JSON export | 🚫 Stream ripping, video download, DRM bypass |
+| **YouTube** | Phase 2 – M2 | **`ACTIVE`** (Backend Merged, UI Implemented) | Video & Shorts metadata, multi-res thumbnails, embed player, JSON export, workspace history, user notes/tags | 🚫 Stream ripping, video download, DRM bypass, playlists/channels |
 | **Pinterest** | Phase 2 – M3 | **`PLANNED`** | Public Pin discovery, original image archiving, board metadata | 🚫 Scraping private boards, auth bypass |
 | **TikTok** | Phase 2 – M4 | **`PLANNED`** | Public video discovery, cover art, author metadata, official embed player | 🚫 Watermark removal, stream scraping |
 | **Facebook** | Phase 2 – M5 | **`PLANNED`** | Public posts & Facebook Watch embeds via Graph API v21.0 | 🚫 Session scraping, private group bypass |
@@ -82,20 +82,29 @@ To enable official live Instagram previews in Snapora:
 
 ---
 
-## 4. Upcoming Provider Specifications: YouTube (Milestone 2)
+## 4. Active Provider Implementations: YouTube (Milestone 2)
 
 ### A. Provider Decomposition
-The upcoming `YouTubeMediaProvider` will be implemented as a unified provider facade orchestrating internal specialized services:
-* `YouTubeUrlParser`: Handles `watch?v=`, `youtu.be/`, `/shorts/`, `/live/`, `/embed/`.
+The active `YouTubeMediaProvider` is implemented as a unified provider facade orchestrating internal specialized services:
+* `YouTubeUrlParser`: Handles `watch?v=`, `youtu.be/`, `/shorts/`, `/live/`, `/embed/`. Canonical 11-char ID validation.
 * `YouTubeOEmbedClient`: Retrieves zero-auth titles, author names, thumbnail URLs, and official iframe HTML.
-* `YouTubeDataApiClient`: Optional API key enrichment for descriptions, upload dates, and high-fidelity metadata.
+* `YouTubeDataApiClient`: Optional API key enrichment for descriptions, upload dates, durations, and high-fidelity metadata.
 * `YouTubeThumbnailService`: Probes multi-resolution variants (`maxresdefault`, `sddefault`, `hqdefault`, `mqdefault`, `default`) with HTTP HEAD dimension validation.
 * `YouTubeEmbedService`: Generates privacy-enhanced (`www.youtube-nocookie.com`) iframe embeds.
 
-### B. YouTube Compliance & Retention Guardrails
-* **30-Day API Data Retention**: Non-authorized API data stored in IndexedDB must expire or refresh after 30 days.
+### B. YouTube Frontend Workspace (`frontend/src/features/youtube/`)
+* `YouTubeWorkspace`: Main coordinating view with responsive layouts and history integration.
+* `YouTubeUrlInput`: Live format detection, paste/clear/cancel actions, and validation error surfacing.
+* `YouTubeVideoPreview`: Privacy-enhanced player respecting `allowed`, `disabled`, and `unknown` embedding states.
+* `YouTubeMetadataCard`: Title, channel link, duration, 30-day retention countdown, JSON export, and user notes/tags editor.
+* `YouTubeThumbnailGallery`: Responsive grid of verified and discovered thumbnails with direct CDN links.
+* `YouTubeHistory`: Local workspace history with reopen, refresh, delete, and user tags retention.
+
+### C. YouTube Compliance & Retention Guardrails
+* **30-Day API Data Retention**: Non-authorized API data stored in IndexedDB and localStorage automatically expires or refreshes after 30 days. User-created workspace notes, tags, collections, and record identities are strictly preserved.
 * **Strict Non-Circumvention**: No extraction of video streams (MP4/WebM) or audio files; direct CDN thumbnail access and JSON metadata export only.
 * **Gated Fallback**: oEmbed fallback is restricted to approved error categories (e.g., quota exhaustion, key misconfiguration), never masking private or deleted content.
+* **Testing Status**: 576 automated tests passing across workspaces (249 frontend + 327 backend).
 
 ---
 
