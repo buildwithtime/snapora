@@ -34,8 +34,8 @@ export interface NormalizedYouTubeMetadata {
   publishedAt?: string;
   thumbnails: YouTubeThumbnailItem[];
   embedUrl?: string;
-  isEmbeddable: boolean;
-  embeddingAllowed: boolean;
+  isEmbeddable?: boolean;
+  embeddingAllowed?: boolean;
   embedStatus: 'allowed' | 'disabled' | 'unknown';
   metadataCapability: YouTubeMetadataCapability;
   metadataFetchedAt: string;
@@ -71,8 +71,8 @@ export interface ApiDerivedYouTubeMetadata {
   publishedAt?: string;
   thumbnails: YouTubeThumbnailItem[];
   embedUrl?: string;
-  isEmbeddable: boolean;
-  embeddingAllowed: boolean;
+  isEmbeddable?: boolean;
+  embeddingAllowed?: boolean;
   embedStatus: 'allowed' | 'disabled' | 'unknown';
   metadataCapability: YouTubeMetadataCapability;
   metadataFetchedAt: string;

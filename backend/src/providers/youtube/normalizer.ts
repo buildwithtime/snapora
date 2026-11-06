@@ -32,13 +32,30 @@ export class YouTubeMetadataNormalizer {
   normalize(input: NormalizerInput): NormalizedYouTubeMetadata {
     const { metadataFetchedAt, metadataExpiresAt } = calculateMetadataExpiration(input.fetchedAt);
 
-    // Explicit embedding capability determination
-    const isEmbeddable = input.isEmbeddable !== false && input.embedStatus !== 'disabled';
-    const embeddingAllowed = isEmbeddable;
-    const embedStatus = input.embedStatus || (isEmbeddable ? 'allowed' : 'disabled');
+    // Determine embedding capability and status
+    let isEmbeddable: boolean | undefined;
+    let embeddingAllowed: boolean | undefined;
+    let embedStatus: 'allowed' | 'disabled' | 'unknown';
 
-    // Do NOT expose an active embed URL when embedding is disabled
-    const embedUrl = isEmbeddable ? youTubeEmbedService.generateEmbedUrl(input.videoId) : undefined;
+    if (input.embedStatus === 'disabled' || input.isEmbeddable === false || input.embeddingAllowed === false) {
+      embedStatus = 'disabled';
+      isEmbeddable = false;
+      embeddingAllowed = false;
+    } else if (input.embedStatus === 'allowed' || (input.embedStatus === undefined && input.isEmbeddable === true)) {
+      embedStatus = 'allowed';
+      isEmbeddable = true;
+      embeddingAllowed = true;
+    } else {
+      // 'unknown' or unverified status (e.g. anonymous oEmbed path or missing Data API status)
+      embedStatus = 'unknown';
+      isEmbeddable = undefined;
+      embeddingAllowed = undefined;
+    }
+
+    // Preserve the existing product behavior of generating the privacy-enhanced embed URL
+    // when embedding is allowed or when attempting an embed with unknown permission,
+    // but strictly omit active embed URL when embedding is explicitly disabled.
+    const embedUrl = embedStatus !== 'disabled' ? youTubeEmbedService.generateEmbedUrl(input.videoId) : undefined;
 
     return {
       platform: 'youtube',

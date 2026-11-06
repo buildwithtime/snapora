@@ -73,6 +73,8 @@ describe('YouTubeMediaProvider Core & Integration Suite', () => {
             },
             embedUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
             isEmbeddable: true,
+            embeddingAllowed: true,
+            embedStatus: 'allowed',
             privacyStatus: 'public'
           }
         })
@@ -97,6 +99,12 @@ describe('YouTubeMediaProvider Core & Integration Suite', () => {
         expect(res.metadataCapability).toBe('FULL_METADATA');
         expect(res.downloadAvailable).toBe(false);
         expect(res.embedUrl).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
+        expect(res.embedStatus).toBe('allowed');
+        expect(res.isEmbeddable).toBe(true);
+        expect(res.embeddingAllowed).toBe(true);
+        expect(res.preview?.embedStatus).toBe('allowed');
+        expect(res.preview?.isEmbeddable).toBe(true);
+        expect(res.preview?.embeddingAllowed).toBe(true);
 
         // Confirm 30-day retention window
         expect(res.metadataFetchedAt).toBeDefined();
@@ -111,10 +119,90 @@ describe('YouTubeMediaProvider Core & Integration Suite', () => {
         expect(res.media![0].downloadable).toBe(false);
       }
     });
+
+    it('accurately propagates disabled embedding permission from Data API', async () => {
+      const mockDataApiClient = {
+        fetchVideoMetadata: vi.fn().mockResolvedValue({
+          ok: true,
+          data: {
+            videoId: 'dQw4w9WgXcQ',
+            title: 'Disabled Video',
+            channelTitle: 'Creator',
+            channelId: 'UC123',
+            durationSeconds: 100,
+            durationFormatted: '01:40',
+            thumbnails: {},
+            embedUrl: undefined,
+            isEmbeddable: false,
+            embeddingAllowed: false,
+            embedStatus: 'disabled',
+            privacyStatus: 'public'
+          }
+        })
+      } as unknown as YouTubeDataApiClient;
+
+      const provider = new YouTubeMediaProvider({
+        dataApiClient: mockDataApiClient,
+        apiKey: 'test-google-api-key'
+      });
+
+      const res = await provider.resolve('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'dQw4w9WgXcQ');
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.embedStatus).toBe('disabled');
+        expect(res.isEmbeddable).toBe(false);
+        expect(res.embeddingAllowed).toBe(false);
+        expect(res.embedUrl).toBeUndefined();
+        expect(res.preview?.embedStatus).toBe('disabled');
+        expect(res.preview?.isEmbeddable).toBe(false);
+        expect(res.preview?.embeddingAllowed).toBe(false);
+        expect(res.preview?.embedUrl).toBeUndefined();
+      }
+    });
+
+    it('accurately propagates unknown embedding permission when Data API status is omitted', async () => {
+      const mockDataApiClient = {
+        fetchVideoMetadata: vi.fn().mockResolvedValue({
+          ok: true,
+          data: {
+            videoId: 'dQw4w9WgXcQ',
+            title: 'Unverified Video',
+            channelTitle: 'Creator',
+            channelId: 'UC123',
+            durationSeconds: 100,
+            durationFormatted: '01:40',
+            thumbnails: {},
+            embedUrl: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ',
+            isEmbeddable: undefined,
+            embeddingAllowed: undefined,
+            embedStatus: 'unknown',
+            privacyStatus: 'public'
+          }
+        })
+      } as unknown as YouTubeDataApiClient;
+
+      const provider = new YouTubeMediaProvider({
+        dataApiClient: mockDataApiClient,
+        apiKey: 'test-google-api-key'
+      });
+
+      const res = await provider.resolve('https://www.youtube.com/watch?v=dQw4w9WgXcQ', 'dQw4w9WgXcQ');
+      expect(res.ok).toBe(true);
+      if (res.ok) {
+        expect(res.embedStatus).toBe('unknown');
+        expect(res.isEmbeddable).toBeUndefined();
+        expect(res.embeddingAllowed).toBeUndefined();
+        expect(res.embedUrl).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
+        expect(res.preview?.embedStatus).toBe('unknown');
+        expect(res.preview?.isEmbeddable).toBeUndefined();
+        expect(res.preview?.embeddingAllowed).toBeUndefined();
+        expect(res.preview?.embedUrl).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
+      }
+    });
   });
 
   describe('Resolution via Anonymous oEmbed (BASIC_METADATA)', () => {
-    it('retrieves basic preview, author, and embed URL without requiring API key', async () => {
+    it('retrieves basic preview, author, and embed URL with unknown embedStatus without requiring API key', async () => {
       const mockOEmbedClient = {
         fetchMetadata: vi.fn().mockResolvedValue({
           ok: true,
@@ -140,13 +228,27 @@ describe('YouTubeMediaProvider Core & Integration Suite', () => {
       expect(res.ok).toBe(true);
       if (res.ok) {
         expect(res.platform).toBe('youtube');
+        expect(res.canonicalUrl).toBe('https://www.youtube.com/watch?v=jNQXAC9IVRw');
         expect(res.title).toBe('Me at the zoo');
         expect(res.author).toBe('jawed');
         expect(res.authorUrl).toBe('https://www.youtube.com/@jawed');
         expect(res.metadataCapability).toBe('BASIC_METADATA');
-        expect(res.embedUrl).toBe('https://www.youtube-nocookie.com/embed/jNQXAC9IVRw');
         expect(res.downloadAvailable).toBe(false);
         expect(res.metadataExpiresAt).toBeDefined();
+
+        // Embedding status must be 'unknown' and must not represent unverified status as confirmed permission
+        expect(res.embedStatus).toBe('unknown');
+        expect(res.isEmbeddable).toBeUndefined();
+        expect(res.embeddingAllowed).toBeUndefined();
+
+        // Privacy-enhanced embed URL is generated for attempting embed
+        expect(res.embedUrl).toBe('https://www.youtube-nocookie.com/embed/jNQXAC9IVRw');
+
+        // Preview mirrors the unknown status
+        expect(res.preview?.embedStatus).toBe('unknown');
+        expect(res.preview?.isEmbeddable).toBeUndefined();
+        expect(res.preview?.embeddingAllowed).toBeUndefined();
+        expect(res.preview?.embedUrl).toBe('https://www.youtube-nocookie.com/embed/jNQXAC9IVRw');
       }
     });
   });
@@ -188,6 +290,11 @@ describe('YouTubeMediaProvider Core & Integration Suite', () => {
       if (res.ok) {
         expect(res.metadataCapability).toBe('BASIC_METADATA');
         expect(res.title).toBe('Fallback Video Title');
+        expect(res.canonicalUrl).toBe('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+        expect(res.embedStatus).toBe('unknown');
+        expect(res.isEmbeddable).toBeUndefined();
+        expect(res.embeddingAllowed).toBeUndefined();
+        expect(res.embedUrl).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
       }
     });
 

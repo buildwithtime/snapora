@@ -52,8 +52,8 @@ export interface YouTubeDataApiVideoData {
   durationFormatted: string;
   thumbnails: Record<string, { url: string; width: number; height: number }>;
   embedUrl?: string;
-  isEmbeddable: boolean;
-  embeddingAllowed: boolean;
+  isEmbeddable?: boolean;
+  embeddingAllowed?: boolean;
   embedStatus: 'allowed' | 'disabled' | 'unknown';
   privacyStatus: string;
 }
@@ -246,23 +246,29 @@ export class YouTubeDataApiClient {
 
       // Handle embedding permission status
       const embeddableRaw = status.embeddable;
-      let isEmbeddable = true;
+      let isEmbeddable: boolean | undefined;
+      let embeddingAllowed: boolean | undefined;
       let embedStatus: 'allowed' | 'disabled' | 'unknown' = 'unknown';
 
       if (embeddableRaw === false) {
         isEmbeddable = false;
+        embeddingAllowed = false;
         embedStatus = 'disabled';
       } else if (embeddableRaw === true) {
         isEmbeddable = true;
+        embeddingAllowed = true;
         embedStatus = 'allowed';
       } else {
-        // Missing status.embeddable (fallback permissive while reporting unknown)
-        isEmbeddable = true;
+        // Missing status.embeddable (unverified permission)
+        isEmbeddable = undefined;
+        embeddingAllowed = undefined;
         embedStatus = 'unknown';
       }
 
-      // Do NOT expose an active embed URL when embedding is disabled
-      const embedUrl = isEmbeddable ? youTubeEmbedService.generateEmbedUrl(videoId) : undefined;
+      // Preserve existing product behavior: generate privacy-enhanced embed URL
+      // when embedding is allowed or attempting an embed with unknown permission,
+      // but do not expose an active embed URL when embedding is explicitly disabled.
+      const embedUrl = embedStatus !== 'disabled' ? youTubeEmbedService.generateEmbedUrl(videoId) : undefined;
 
       return {
         ok: true,
@@ -278,7 +284,7 @@ export class YouTubeDataApiClient {
           thumbnails: snippet.thumbnails || {},
           embedUrl,
           isEmbeddable,
-          embeddingAllowed: isEmbeddable,
+          embeddingAllowed,
           embedStatus,
           privacyStatus: status.privacyStatus || 'public'
         }

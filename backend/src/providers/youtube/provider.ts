@@ -164,9 +164,7 @@ export class YouTubeMediaProvider implements IMediaProvider {
       authorUrl: oembedData.authorUrl,
       thumbnails,
       metadataCapability: 'BASIC_METADATA',
-      isEmbeddable: true,
-      embeddingAllowed: true,
-      embedStatus: 'allowed'
+      embedStatus: 'unknown'
     });
 
     return this.normalizer.buildResolveSuccess(normalized);

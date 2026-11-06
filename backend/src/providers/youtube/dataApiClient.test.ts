@@ -144,8 +144,8 @@ describe('YouTubeDataApiClient Suite', () => {
       const result = await client.fetchVideoMetadata('dQw4w9WgXcQ', testApiKey);
       expect(result.ok).toBe(true);
       if (result.ok) {
-        expect(result.data.isEmbeddable).toBe(true);
-        expect(result.data.embeddingAllowed).toBe(true);
+        expect(result.data.isEmbeddable).toBeUndefined();
+        expect(result.data.embeddingAllowed).toBeUndefined();
         expect(result.data.embedStatus).toBe('unknown');
         expect(result.data.embedUrl).toBe('https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ');
       }
