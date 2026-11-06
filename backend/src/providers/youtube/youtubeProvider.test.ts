@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest';
+import { Readable } from 'node:stream';
 import { FastifyInstance } from 'fastify';
 import { buildServer } from '../../server.js';
+import * as ssrfClient from '../../utils/ssrfClient.js';
 import { YouTubeMediaProvider } from './provider.js';
 import { YouTubeOEmbedClient } from './oembedClient.js';
 import { YouTubeDataApiClient } from './dataApiClient.js';
@@ -297,17 +299,30 @@ describe('YouTubeMediaProvider Core & Integration Suite', () => {
     });
 
     it('permits approved YouTube thumbnail CDN hosts through the download route host validator', async () => {
-      // Probing with a non-existent or loopback image target to test host validator acceptance
+      const validJpegBytes = Buffer.from([
+        0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00, 0x01
+      ]);
+      const spy = vi.spyOn(ssrfClient, 'safeHttpsRequest').mockResolvedValueOnce({
+        statusCode: 200,
+        headers: { 'content-type': 'image/jpeg', 'content-length': String(validJpegBytes.length) },
+        stream: Readable.from([validJpegBytes]) as any
+      });
+
       const res = await app.inject({
         method: 'GET',
         url: '/api/download?url=https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg&expectedType=image'
       });
 
-      // Hostname 'i.ytimg.com' passes host validation; does NOT fail with 'not in the allowed domain list'
-      const json = res.json();
-      if (!json.ok) {
-        expect(json.error.message).not.toContain('not in the allowed domain list');
-      }
+      expect(res.statusCode).toBe(200);
+      expect(spy).toHaveBeenCalled();
+      const passedValidator = spy.mock.calls[0][1]?.allowedHostsValidator;
+      expect(passedValidator).toBeDefined();
+      expect(passedValidator!('i.ytimg.com')).toBe(true);
+      expect(passedValidator!('img.youtube.com')).toBe(true);
+      expect(passedValidator!('www.youtube.com')).toBe(false);
+      expect(passedValidator!('youtube.com')).toBe(false);
+
+      spy.mockRestore();
     });
   });
 
