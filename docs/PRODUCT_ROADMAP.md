@@ -53,8 +53,8 @@ The existing, hardened Instagram engine remains fully active, supported, and pro
 │ Priority        │ Milestone & Platform Focus                      │ Status     │
 ├─────────────────┼─────────────────────────────────────────────────┼────────────┤
 │ Milestone 1     │ Universal Provider & Type Abstraction           │ ✅ Merged  │
-│ Milestone 2 (1) │ YouTube – Metadata & Thumbnail Workspace        │ 🟢 Implemented (M2a Merged, M2b UI) │
-│ Milestone 3 (2) │ Pinterest – Public Pin Discovery & Archiving    │ ⚪ Planned │
+│ Milestone 2 (1) │ YouTube – Metadata & Thumbnail Workspace        │ ✅ Merged  │
+│ Milestone 3 (2) │ Pinterest – Public Pin Discovery & Workspace    │ 🟢 Implemented (M3a Feasibility, M3b Backend Core) │
 │ Milestone 4 (3) │ TikTok – Public Discovery & Permitted Embeds    │ ⚪ Planned │
 │ Milestone 5 (4) │ Facebook – Official API & Public Media Preview  │ ⚪ Planned │
 │ Milestone 6 (5) │ X/Twitter – Official API & Embed Integrations   │ ⚪ Planned │
@@ -120,17 +120,20 @@ The existing, hardened Instagram engine remains fully active, supported, and pro
 
 ---
 
-#### Milestone 3: Pinterest – Public Pin Discovery & Image Archiving
-* **Status**: ⚪ **Planned**
-* **Target Objective**: Add support for discovering public Pinterest pins, extracting high-resolution original image assets, and enabling individual and batch image archiving.
+#### Milestone 3: Pinterest – Public Pin Discovery & Workspace
+* **Status**: 🟢 **Implemented** (M3a Feasibility & Architecture Verified, M3b Backend Provider Core Implemented; M3c Frontend Workspace Planned)
+* **Target Objective**: Add support for discovering public Pinterest pins, extracting verified preview thumbnails, providing secure standalone embed frames, and enforcing strict 30-day data retention and non-circumvention policies.
 * **Key Components**:
-  1. `PinterestPlatformDetector`: Match `pinterest.com/pin/*`, `pin.it/*`, `pinterest.<tld>/*`.
-  2. `PinterestMediaProvider`:
-     * Public Pin metadata resolution via Open Graph metadata and official Rich Pin embeds.
-     * High-resolution image CDN extraction (`i.pinimg.com/originals/`).
-     * Board and author attribution metadata extraction.
-  3. **SSRF Allowlist**: Whitelist `*.pinimg.com`, `pinterest.com`.
-  4. **Workspace Capabilities**: Image preview, zoom gallery, direct image download, board attribution cards.
+  1. `PinterestPlatformDetector`: Match `pinterest.com/pin/*`, `pin.it/*`, `pinterest.<tld>/*`, and `*.pinterest.com/*`. Rejects boards, profiles, feeds, and invalid Pin IDs.
+  2. `PinterestMediaProvider`: Modular backend facade implementing `IMediaProvider`:
+     * `PinterestUrlParser`: Canonical 16-22 digit numeric Pin ID validation and SSRF-safe 5-hop shortlink traversal.
+     * `PinterestOEmbedClient`: Official zero-auth `https://www.pinterest.com/oembed.json` endpoint with 512KB size limit, 10s timeout, config disablement, and Pin identity validation.
+     * `PinterestEmbedService`: Privacy-enhanced standalone sandboxed embed frame (`https://assets.pinterest.com/ext/embed.html?id={pinId}&src=oembed`) with `allow-scripts allow-same-origin allow-popups`.
+     * `PinterestThumbnailService`: 236x thumbnail verification via JPEG binary SOF markers and MIME type check with fail-soft fallback.
+     * `PinterestMetadataNormalizer`: Standardized normalization with 30-day lifecycle retention timestamps and strict non-circumvention (`downloadAvailable: false`, `downloadable: false`).
+  3. **Non-Circumvention Compliance**: Strict prohibition against bulk image downloading, video downloading, and stream ripping. Preview thumbnails and metadata export only.
+  4. **SSRF Allowlist**: Whitelist `i.pinimg.com`, `assets.pinterest.com`, `pinterest.com`, `pin.it`. (Legacy `s-media-cache-ak0.pinimg.com` omitted to maintain tightest boundary).
+  5. **Testing Status**: 674 automated tests passing (258 frontend + 416 backend) with 89 dedicated Pinterest provider tests.
 
 ---
 

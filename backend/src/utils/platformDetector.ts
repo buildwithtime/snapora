@@ -1,5 +1,6 @@
 import type { PlatformId, UnifiedMediaType } from '../providers/types.js';
 
+
 export type { PlatformId, UnifiedMediaType };
 
 export interface DirectMediaInfo {
@@ -485,12 +486,197 @@ export class YouTubePlatformDetector implements IPlatformDetector {
   }
 }
 
+// Canonical supported Pinterest web hosts
+export const EXACT_ALLOWED_PINTEREST_HOSTS = new Set([
+  'pinterest.com',
+  'www.pinterest.com',
+  'm.pinterest.com',
+  'pin.it'
+]);
+
+export const PINTEREST_PIN_ID_REGEX = /^\d{16,22}$/;
+
+export const PINTEREST_CCTLD_REGEX = /^([a-z]{2,5}\.)?pinterest\.(co\.uk|ca|de|fr|com\.au|es|it|jp|co\.kr|ch|at|co\.nz|ie|se|pt)$/;
+
+export const EXACT_ALLOWED_PINTEREST_DOWNLOAD_HOSTS = new Set([
+  'i.pinimg.com'
+]);
+
+export function isAllowedPinterestHost(hostname: string): boolean {
+  const clean = hostname.toLowerCase().replace(/\.+$/, '');
+  if (EXACT_ALLOWED_PINTEREST_HOSTS.has(clean)) {
+    return true;
+  }
+  if (clean.endsWith('.pinterest.com') && !clean.includes('..')) {
+    return true;
+  }
+  if (PINTEREST_CCTLD_REGEX.test(clean)) {
+    return true;
+  }
+  return false;
+}
+
+export class PinterestPlatformDetector implements IPlatformDetector {
+  readonly platformId: PlatformId = 'pinterest';
+  readonly name = 'Pinterest';
+  readonly supportedHostnames: ReadonlyArray<string> = [
+    'pinterest.com',
+    'www.pinterest.com',
+    'pin.it'
+  ];
+
+  matches(url: URL): boolean {
+    return isAllowedPinterestHost(url.hostname);
+  }
+
+  detect(rawUrl: string, parsedUrl: URL): PlatformDetectResult {
+    // 1. Enforce HTTPS only
+    if (parsedUrl.protocol !== 'https:') {
+      return {
+        matched: true,
+        platformId: 'pinterest',
+        error: 'Only HTTPS Pinterest URLs are permitted'
+      };
+    }
+
+    // 2. Reject embedded credentials
+    if (parsedUrl.username || parsedUrl.password) {
+      return {
+        matched: true,
+        platformId: 'pinterest',
+        error: 'Embedded authentication credentials are not permitted'
+      };
+    }
+
+    // 3. Reject non-standard ports
+    if (parsedUrl.port && parsedUrl.port !== '443') {
+      return {
+        matched: true,
+        platformId: 'pinterest',
+        error: 'Non-standard ports are prohibited'
+      };
+    }
+
+    const hostname = parsedUrl.hostname.toLowerCase().replace(/\.+$/, '');
+    const cleanPath = parsedUrl.pathname.replace(/\/+$/, '') || '/';
+
+    // 4. Handle pin.it shortlinks
+    if (hostname === 'pin.it') {
+      const shortcode = cleanPath.replace(/^\/+/, '');
+      if (!shortcode || !/^[a-zA-Z0-9_-]{3,20}$/.test(shortcode)) {
+        return {
+          matched: true,
+          platformId: 'pinterest',
+          error: `Invalid or malformed pin.it shortcode '${shortcode}'`
+        };
+      }
+
+      return {
+        matched: true,
+        platformId: 'pinterest',
+        info: {
+          platformId: 'pinterest',
+          contentType: 'post',
+          canonicalUrl: `https://pin.it/${shortcode}`,
+          originalUrl: rawUrl,
+          shortcode,
+          contentId: shortcode
+        }
+      };
+    }
+
+    // 5. Reject search, today, and ideas feeds
+    if (
+      cleanPath.startsWith('/search') ||
+      cleanPath.startsWith('/today') ||
+      cleanPath.startsWith('/ideas')
+    ) {
+      return {
+        matched: true,
+        platformId: 'pinterest',
+        error: 'Pinterest search and feed pages are not supported. Please provide a direct Pin URL.'
+      };
+    }
+
+    // 6. Handle standard /pin/{id}
+    if (cleanPath.startsWith('/pin/') || cleanPath === '/pin') {
+      const match = cleanPath.match(/^\/pin\/(\d+)$/);
+      if (!match) {
+        // Path starts with /pin/ but ID is non-numeric or malformed
+        const subPath = cleanPath.replace(/^\/pin\/?/, '');
+        return {
+          matched: true,
+          platformId: 'pinterest',
+          error: `Invalid Pinterest Pin URL: invalid identifier '${subPath}'. Expected a 16-22 digit numeric Pin ID.`
+        };
+      }
+
+      const pinId = match[1];
+      if (!PINTEREST_PIN_ID_REGEX.test(pinId)) {
+        return {
+          matched: true,
+          platformId: 'pinterest',
+          error: `Invalid Pinterest Pin ID '${pinId}'. Must be a 16-22 digit numeric identifier.`
+        };
+      }
+
+      return {
+        matched: true,
+        platformId: 'pinterest',
+        info: {
+          platformId: 'pinterest',
+          contentType: 'post',
+          canonicalUrl: `https://www.pinterest.com/pin/${pinId}/`,
+          originalUrl: rawUrl,
+          shortcode: pinId,
+          contentId: pinId
+        }
+      };
+    }
+
+    // 7. Explicitly reject board and profile URLs
+    const segments = cleanPath.split('/').filter(Boolean);
+    if (segments.length === 1) {
+      return {
+        matched: true,
+        platformId: 'pinterest',
+        error: `Pinterest user profiles (@${segments[0]}) are not supported. Please provide a direct Pin URL.`
+      };
+    }
+    if (segments.length >= 2) {
+      return {
+        matched: true,
+        platformId: 'pinterest',
+        error: `Pinterest boards (${segments[0]}/${segments[1]}) are not supported. Please provide a direct Pin URL.`
+      };
+    }
+
+    return {
+      matched: true,
+      platformId: 'pinterest',
+      error: 'Unrecognized Pinterest URL format. Expected /pin/{id}/ or pin.it/{shortcode}.'
+    };
+  }
+
+  isAllowedDownloadHost(hostname: string): boolean {
+    const clean = hostname.toLowerCase().replace(/\.+$/, '');
+    return EXACT_ALLOWED_PINTEREST_DOWNLOAD_HOSTS.has(clean);
+  }
+
+  getAllowedDownloadHosts(): Array<string | RegExp> {
+    return Array.from(EXACT_ALLOWED_PINTEREST_DOWNLOAD_HOSTS);
+  }
+}
+
+export const pinterestPlatformDetector = new PinterestPlatformDetector();
+
 export class UniversalPlatformRegistry {
   private detectors: Map<PlatformId, IPlatformDetector> = new Map();
 
   constructor() {
     this.registerDetector(new InstagramPlatformDetector());
     this.registerDetector(new YouTubePlatformDetector());
+    this.registerDetector(new PinterestPlatformDetector());
   }
 
   registerDetector(detector: IPlatformDetector): void {
