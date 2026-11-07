@@ -10,7 +10,7 @@ Snapora utilizes a universal, decoupled provider architecture (`UniversalPlatfor
 | :--- | :--- | :--- | :--- | :--- |
 | **Instagram** | Baseline / M1 | **`ACTIVE`** (Production) | Posts (`/p/`), Reels (`/reel/`), Carousels, Profile Discovery, Rate-Limit Resilience | ⏸️ Profile-wide bulk ZIP download, infinite pagination |
 | **YouTube** | Phase 2 – M2 | **`ACTIVE`** (Backend Merged, UI Implemented) | Video & Shorts metadata, multi-res thumbnails, embed player, JSON export, workspace history, user notes/tags | 🚫 Stream ripping, video download, DRM bypass, playlists/channels |
-| **Pinterest** | Phase 2 – M3 | **`PLANNED`** | Public Pin discovery, original image archiving, board metadata | 🚫 Scraping private boards, auth bypass |
+| **Pinterest** | Phase 2 – M3 | **`ACTIVE`** (Backend Core Implemented, UI Planned for M3c) | Public Pin metadata discovery, verified 236x thumbnail preview, standalone embed frame (`assets.pinterest.com`), SSRF-safe shortlink resolution (`pin.it`), 30-day retention | 🚫 Bulk image downloading, video downloading, stream ripping, private boards, auth bypass |
 | **TikTok** | Phase 2 – M4 | **`PLANNED`** | Public video discovery, cover art, author metadata, official embed player | 🚫 Watermark removal, stream scraping |
 | **Facebook** | Phase 2 – M5 | **`PLANNED`** | Public posts & Facebook Watch embeds via Graph API v21.0 | 🚫 Session scraping, private group bypass |
 | **X (Twitter)** | Phase 2 – M6 | **`PLANNED`** | Tweet embeds, author attribution, public media attachments | 🚫 Firehose scraping, login wall bypass |
@@ -108,7 +108,26 @@ The active `YouTubeMediaProvider` is implemented as a unified provider facade or
 
 ---
 
-## 5. Separation of Preview vs. Media Downloading
+## 5. Active Provider Implementations: Pinterest (Milestone 3b)
+
+### A. Provider Decomposition
+The active `PinterestMediaProvider` (`backend/src/providers/pinterest/`) is implemented using the universal provider architecture:
+* `PinterestPlatformDetector`: Matches `pinterest.com`, `pin.it`, regional ccTLDs, and subdomains. Validates 16-22 digit numeric Pin IDs and rejects boards, profiles, feeds, and non-HTTPS protocols.
+* `PinterestUrlParser`: Parses canonical Pin URLs and safely traverses `pin.it` shortlinks via 5-hop SSRF-validated HEAD requests.
+* `PinterestOEmbedClient`: Interacts with official `https://www.pinterest.com/oembed.json` with 512KB response limit, 10-second timeout, Pin identity verification, and config disablement flag (`PINTEREST_OEMBED_ENABLED`).
+* `PinterestEmbedService`: Generates canonical standalone embed frame (`https://assets.pinterest.com/ext/embed.html?id={pinId}&src=oembed`) requiring strict iframe sandbox `allow-scripts allow-same-origin allow-popups`.
+* `PinterestThumbnailService`: Inspects 236x preview thumbnail (`i.pinimg.com`) via binary JPEG SOF markers and MIME type headers, falling back gracefully on failures.
+* `PinterestMetadataNormalizer`: Unifies metadata with `embedStatus: 'unknown'`, 30-day lifecycle expiration dates, and strict non-circumvention markers (`downloadAvailable: false`, `downloadable: false`).
+
+### B. Pinterest Compliance & Retention Guardrails
+* **30-Day API Data Retention**: Third-party API data strictly expires within 30 days pursuant to Pinterest Developer Terms, while user workspace metadata (notes, tags, collections) remains permanently preserved.
+* **Strict Non-Circumvention Policy**: Zero stream ripping, original video downloading, or bulk image downloading. Only verified preview thumbnails and metadata export are supported.
+* **Network & SSRF Safeguards**: Whitelist strictly limits outbound connections to `www.pinterest.com`, `pinterest.com`, `pin.it`, `api.pinterest.com`, and `i.pinimg.com` / `s-media-cache-ak0.pinimg.com`.
+* **Testing Status**: 89 dedicated unit and integration tests passing; 674 total tests across repository.
+
+---
+
+## 6. Separation of Preview vs. Media Downloading
 
 Snapora enforces a strict architectural boundary between preview retrieval and file downloading across all platforms:
 
@@ -144,7 +163,7 @@ When a live preview is retrieved:
 
 ---
 
-## 6. Prohibited Pathways & Security Standards
+## 7. Prohibited Pathways & Security Standards
 
 To preserve open-source integrity, user security, and platform compliance:
 1. **SSRF Hardening**: Download and preview proxy requests undergo pre-flight DNS resolution and IP allowlist validation, blocking private (RFC1918), loopback, link-local, and cloud metadata (`169.254.169.254`) addresses.

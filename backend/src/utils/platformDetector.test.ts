@@ -114,7 +114,8 @@ describe('Modular Platform Detectors & UniversalPlatformRegistry', () => {
       expect(detector).toBeDefined();
       expect(detector?.platformId).toBe('instagram');
       expect(registry.getDetector('youtube')).toBeDefined();
-      expect(registry.listDetectors()).toHaveLength(2);
+      expect(registry.getDetector('pinterest')).toBeDefined();
+      expect(registry.listDetectors()).toHaveLength(3);
     });
 
     it('allows registering additional platform detectors dynamically', () => {
@@ -148,7 +149,7 @@ describe('Modular Platform Detectors & UniversalPlatformRegistry', () => {
 
       registry.registerDetector(mockDetector);
       expect(registry.getDetector('generic')).toBeDefined();
-      expect(registry.listDetectors()).toHaveLength(3);
+      expect(registry.listDetectors()).toHaveLength(4);
 
       const res = registry.detectPlatform('https://example.com/media/test');
       expect(res.matched).toBe(true);

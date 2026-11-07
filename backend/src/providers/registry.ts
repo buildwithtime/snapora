@@ -5,6 +5,7 @@ import { DirectMediaUrlProvider } from './direct.js';
 import { AuthorizedAccountMediaProvider } from './authorized.js';
 import { PublicWebMediaProvider } from './public.js';
 import { YouTubeMediaProvider } from './youtube/index.js';
+import { PinterestMediaProvider } from './pinterest/index.js';
 import { parseInstagramUrl } from '../utils/urlParser.js';
 import { universalPlatformRegistry, UniversalPlatformRegistry } from '../utils/platformDetector.js';
 import { config } from '../config/index.js';
@@ -33,6 +34,7 @@ export class ProviderCapabilityRegistry {
     this.register(new AuthorizedAccountMediaProvider({ userAccessToken: config.instagramUserAccessToken }));
     this.register(new PublicWebMediaProvider());
     this.register(new YouTubeMediaProvider());
+    this.register(new PinterestMediaProvider());
 
     if (config.defaultProvider && this.providers.has(config.defaultProvider)) {
       this.defaultProviderId = config.defaultProvider;

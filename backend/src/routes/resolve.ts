@@ -68,26 +68,26 @@ export async function resolveRoutes(app: FastifyInstance, options?: { provider?:
               ? 401
               : result.error.code === 'CONTENT_PRIVATE' || result.error.code === 'PRIVATE_ACCOUNT' || result.error.code === 'HTTP_403_FORBIDDEN' || result.error.code === 'LOGIN_WALL_ENCOUNTERED' || result.error.code === 'PRIVATE_VIDEO'
               ? 403
-              : result.error.code === 'CONTENT_UNAVAILABLE' || result.error.code === 'POST_NOT_FOUND' || result.error.code === 'METADATA_NOT_FOUND' || result.error.code === 'VIDEO_NOT_FOUND'
+              : result.error.code === 'CONTENT_UNAVAILABLE' || result.error.code === 'POST_NOT_FOUND' || result.error.code === 'METADATA_NOT_FOUND' || result.error.code === 'VIDEO_NOT_FOUND' || result.error.code === 'PIN_NOT_FOUND'
               ? 404
               : result.error.code === 'EXPIRED_MEDIA_URL' || result.error.code === 'MEDIA_URL_EXPIRED'
               ? 410
               : result.error.code === 'RATE_LIMITED' ||
                 result.error.code === 'HTTP_429_RATE_LIMITED' ||
                 result.error.code === 'UPSTREAM_RATE_LIMITED' ||
-                result.error.code === 'LOCAL_RATE_LIMITED' || result.error.code === 'QUOTA_EXCEEDED' || result.error.code === 'DAILY_LIMIT_EXCEEDED'
+                result.error.code === 'LOCAL_RATE_LIMITED' || result.error.code === 'QUOTA_EXCEEDED' || result.error.code === 'DAILY_LIMIT_EXCEEDED' || result.error.code === 'PINTEREST_RATE_LIMITED'
               ? 429
-              : result.error.code === 'PAGE_FETCH_FAILED' || result.error.code === 'CDN_REQUEST_FAILED' || result.error.code === 'STREAM_INTERRUPTED' || result.error.code === 'PROVIDER_UNAVAILABLE'
+              : result.error.code === 'PAGE_FETCH_FAILED' || result.error.code === 'CDN_REQUEST_FAILED' || result.error.code === 'STREAM_INTERRUPTED' || result.error.code === 'PROVIDER_UNAVAILABLE' || result.error.code === 'PINTEREST_UNAVAILABLE'
               ? 502
-              : result.error.code === 'PROVIDER_NOT_CONFIGURED' || result.error.code === 'CONFIGURATION_REQUIRED' || result.error.code === 'INVALID_API_KEY' || result.error.code === 'API_NOT_ENABLED'
+              : result.error.code === 'PROVIDER_NOT_CONFIGURED' || result.error.code === 'CONFIGURATION_REQUIRED' || result.error.code === 'INVALID_API_KEY' || result.error.code === 'API_NOT_ENABLED' || result.error.code === 'PINTEREST_OEMBED_DISABLED'
               ? 503
-              : result.error.code === 'SSRF_BLOCKED' || result.error.code === 'UNSUPPORTED_URL' || result.error.code === 'INVALID_URL'
+              : result.error.code === 'SSRF_BLOCKED' || result.error.code === 'UNSUPPORTED_URL' || result.error.code === 'INVALID_URL' || result.error.code === 'INVALID_PIN_ID' || result.error.code === 'PINTEREST_REDIRECT_REJECTED'
               ? 400
               : result.error.code === 'FILE_TOO_LARGE'
               ? 413
-              : result.error.code === 'MEDIA_VALIDATION_FAILED' || result.error.code === 'INVALID_RESPONSE' || result.error.code === 'EMBEDDING_DISABLED'
+              : result.error.code === 'MEDIA_VALIDATION_FAILED' || result.error.code === 'INVALID_RESPONSE' || result.error.code === 'EMBEDDING_DISABLED' || result.error.code === 'PINTEREST_INVALID_RESPONSE'
               ? 422
-              : result.error.code === 'UPSTREAM_TIMEOUT' || result.error.code === 'TIMEOUT' ? 504 : 502;
+              : result.error.code === 'UPSTREAM_TIMEOUT' || result.error.code === 'TIMEOUT' || result.error.code === 'PINTEREST_TIMEOUT' ? 504 : 502;
 
           if (status === 429) {
             const isLocal = result.error.code === 'LOCAL_RATE_LIMITED';
