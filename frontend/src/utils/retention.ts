@@ -37,6 +37,9 @@ export function isMetadataExpired(metadataExpiresAt?: string | null, now: Date =
   return now.getTime() >= expiresTime;
 }
 
+export const isYouTubeMetadataExpired = isMetadataExpired;
+export const calculateYouTubeRetention = calculateMetadataExpiration;
+
 export function isMetadataStale(
   metadataExpiresAt?: string | null,
   staleWindowDays = 5,

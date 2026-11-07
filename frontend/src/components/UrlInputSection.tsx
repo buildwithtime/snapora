@@ -4,7 +4,11 @@ import { useProfileGallery } from '../context/ProfileGalleryContext.js';
 import { getRecentDownloads, clearRecentDownloads, RecentDownloadItem } from '../utils/recentHistory.js';
 import { parseInstagramUrl } from '../utils/urlValidator.js';
 
-export const UrlInputSection: React.FC = () => {
+export interface UrlInputSectionProps {
+  onSwitchToYouTube?: () => void;
+}
+
+export const UrlInputSection: React.FC<UrlInputSectionProps> = ({ onSwitchToYouTube }) => {
   const { addUrls, userAccessToken, setUserAccessToken, state } = useQueue();
   const { loadProfile, state: profileGalleryState } = useProfileGallery();
   const isSubmittingRef = useRef<boolean>(false);
@@ -31,6 +35,13 @@ export const UrlInputSection: React.FC = () => {
       }
     }
     return null;
+  }, [inputText]);
+
+  // Detect if user pasted YouTube links into the Instagram queue input
+  const hasYouTubeLink = React.useMemo(() => {
+    if (!inputText.trim()) return false;
+    const lines = inputText.split(/(?:\r?\n|,|\s)+/).filter(Boolean);
+    return lines.some((l) => l.includes('youtube.com') || l.includes('youtu.be'));
   }, [inputText]);
 
   // Check if profile discovery is currently active for the same profile
@@ -375,6 +386,37 @@ export const UrlInputSection: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {hasYouTubeLink && (
+          <div
+            style={{
+              padding: '0.65rem 0.9rem',
+              borderRadius: 'var(--radius-sm)',
+              background: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '0.5rem',
+              fontSize: '0.82rem',
+              color: 'var(--text-main)',
+              marginBottom: '1rem',
+              flexWrap: 'wrap'
+            }}
+          >
+            <span>📺 Detected YouTube URL. Would you like to open it in the YouTube Workspace?</span>
+            {onSwitchToYouTube && (
+              <button
+                type="button"
+                onClick={onSwitchToYouTube}
+                className="btn btn-secondary"
+                style={{ fontSize: '0.78rem', padding: '0.25rem 0.65rem', borderColor: '#f87171', color: '#f87171' }}
+              >
+                Switch to YouTube Workspace ↗
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Primary Action Row with clear spacing */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: '0.75rem' }}>
