@@ -24,7 +24,7 @@ export const App: React.FC = () => {
     const handleHashChange = () => {
       if (window.location.hash === '#youtube') {
         setActiveTab('youtube');
-      } else if (window.location.hash === '#instagram') {
+      } else {
         setActiveTab('instagram');
       }
     };
