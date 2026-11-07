@@ -1,12 +1,28 @@
 /**
  * Pinterest API Data Retention Policy Helpers
  *
- * In compliance with Pinterest Developer Terms, third-party applications must delete
- * stored Pinterest API data without undue delay and in no event later than thirty (30) days.
+ * Compliance with Pinterest Developer Terms requires third-party applications to delete
+ * or refresh stored Pinterest API data without undue delay and at latest within thirty (30) days.
  *
- * This utility enforces the 30-day lifecycle expiration on upstream metadata
- * while allowing user-authored workspace records (notes, tags, collections, and record identity)
- * to be permanently preserved.
+ * Categorization of Workspace Data:
+ * 1. Pinterest-Derived Upstream Metadata:
+ *    - Titles, author names, author URLs, preview thumbnail URLs, and embed snippets
+ *      retrieved from Pinterest's oEmbed endpoint.
+ *    - Retention Rule: Subject to the 30-day lifecycle expiration window. Must be purged
+ *      or refreshed upon reaching metadataExpiresAt.
+ *
+ * 2. User-Created Annotations:
+ *    - Personal user notes, custom tags, workspace collections, and user-assigned labels.
+ *    - Retention Rule: Independent user-authored content managed and retained at user discretion.
+ *
+ * 3. Canonical URLs and Pin Identifiers:
+ *    - The canonical web permalink (https://www.pinterest.com/pin/<id>/) and numeric Pin ID.
+ *    - Retention Status & Policy Interpretation:
+ *      Whether canonical web URLs and platform-assigned numeric identifiers constitute
+ *      'Pinterest Data' subject to mandatory 30-day deletion remains an unresolved policy
+ *      interpretation across developer platforms. Snapora does not claim that every identifier
+ *      is permanently exempt; instead, it enforces explicit 30-day lifecycle timestamps on all
+ *      resolved metadata payloads to support transparent client-side refresh workflows.
  */
 
 export const PINTEREST_METADATA_RETENTION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days in milliseconds

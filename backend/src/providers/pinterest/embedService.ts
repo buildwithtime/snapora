@@ -11,9 +11,9 @@ export const PINTEREST_REQUIRED_IFRAME_SANDBOX = 'allow-scripts allow-same-origi
 
 export interface ValidatedPinterestEmbed {
   embedUrl: string;
-  isEmbeddable: boolean;
-  embeddingAllowed: boolean;
-  embedStatus: 'allowed';
+  isEmbeddable?: boolean;
+  embeddingAllowed?: boolean;
+  embedStatus: 'allowed' | 'disabled' | 'unknown';
   requiredSandbox: string;
 }
 
@@ -118,9 +118,9 @@ export class PinterestEmbedService {
 
     return {
       embedUrl: finalEmbedUrl,
-      isEmbeddable: true,
-      embeddingAllowed: true,
-      embedStatus: 'allowed',
+      isEmbeddable: undefined,
+      embeddingAllowed: undefined,
+      embedStatus: 'unknown',
       requiredSandbox: PINTEREST_REQUIRED_IFRAME_SANDBOX
     };
   }

@@ -4,8 +4,7 @@ import { parseImageDimensions } from '../youtube/thumbnailService.js';
 import { PinterestThumbnailItem } from './types.js';
 
 export const APPROVED_PINTEREST_THUMBNAIL_HOSTS = new Set([
-  'i.pinimg.com',
-  's-media-cache-ak0.pinimg.com'
+  'i.pinimg.com'
 ]);
 
 export interface ThumbnailVerificationResult {

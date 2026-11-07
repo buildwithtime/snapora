@@ -33,7 +33,7 @@ describe('PinterestEmbedService Suite', () => {
       expect(service.validateEmbedUrl(url, validPinId)).toBe(true);
     });
 
-    it('rejects URLs where Pin ID does not match expectedPinId', () => {
+    it('rejects URLs where Pin ID does not match expectedPinId (Mismatched Pin ID rejection)', () => {
       const url = `https://${APPROVED_PINTEREST_EMBED_HOST}${APPROVED_PINTEREST_EMBED_PATH}?id=${validPinId}&src=oembed`;
       expect(service.validateEmbedUrl(url, '999999999999999999')).toBe(false);
     });
@@ -43,9 +43,10 @@ describe('PinterestEmbedService Suite', () => {
       expect(service.validateEmbedUrl(url)).toBe(false);
     });
 
-    it('rejects foreign or spoofed hostnames', () => {
+    it('rejects foreign or spoofed hostnames (Invalid embed host rejection)', () => {
       expect(service.validateEmbedUrl(`https://evil.com/ext/embed.html?id=${validPinId}`)).toBe(false);
       expect(service.validateEmbedUrl(`https://assets.pinterest.com.evil.com/ext/embed.html?id=${validPinId}`)).toBe(false);
+      expect(service.validateEmbedUrl(`https://attacker-domain.org/ext/embed.html?id=${validPinId}`)).toBe(false);
     });
 
     it('rejects unexpected paths', () => {
@@ -59,19 +60,28 @@ describe('PinterestEmbedService Suite', () => {
   });
 
   describe('resolveEmbedUrl', () => {
-    it('extracts and validates embed URL from official oEmbed HTML snippet', () => {
+    it('extracts embed URL from oEmbed snippet and reports unconfirmed permission status', () => {
       const htmlSnippet = `<iframe src="https://${APPROVED_PINTEREST_EMBED_HOST}${APPROVED_PINTEREST_EMBED_PATH}?id=${validPinId}&amp;src=oembed" height="714" width="345"></iframe>`;
       const res = service.resolveEmbedUrl(htmlSnippet, validPinId);
+
+      // Embed URL remains available for frontend playback attempt
       expect(res.embedUrl).toBe(`https://${APPROVED_PINTEREST_EMBED_HOST}${APPROVED_PINTEREST_EMBED_PATH}?id=${validPinId}&src=oembed`);
-      expect(res.isEmbeddable).toBe(true);
-      expect(res.embeddingAllowed).toBe(true);
-      expect(res.embedStatus).toBe('allowed');
+
+      // Permission status must be unconfirmed ('unknown')
+      expect(res.embedStatus).toBe('unknown');
+      expect(res.isEmbeddable).toBeUndefined();
+      expect(res.embeddingAllowed).toBeUndefined();
+
+      // Required sandbox flags preserved
       expect(res.requiredSandbox).toBe(PINTEREST_REQUIRED_IFRAME_SANDBOX);
     });
 
-    it('falls back cleanly to buildEmbedUrl when HTML snippet is empty or missing', () => {
+    it('falls back cleanly to buildEmbedUrl with unknown status when HTML snippet is empty', () => {
       const res = service.resolveEmbedUrl(null, validPinId);
       expect(res.embedUrl).toBe(`https://${APPROVED_PINTEREST_EMBED_HOST}${APPROVED_PINTEREST_EMBED_PATH}?id=${validPinId}&src=oembed`);
+      expect(res.embedStatus).toBe('unknown');
+      expect(res.isEmbeddable).toBeUndefined();
+      expect(res.embeddingAllowed).toBeUndefined();
       expect(res.requiredSandbox).toBe(PINTEREST_REQUIRED_IFRAME_SANDBOX);
     });
 
@@ -79,6 +89,9 @@ describe('PinterestEmbedService Suite', () => {
       const untrustedHtml = '<iframe src="https://evil.com/fake-embed"></iframe>';
       const res = service.resolveEmbedUrl(untrustedHtml, validPinId);
       expect(res.embedUrl).toBe(`https://${APPROVED_PINTEREST_EMBED_HOST}${APPROVED_PINTEREST_EMBED_PATH}?id=${validPinId}&src=oembed`);
+      expect(res.embedStatus).toBe('unknown');
+      expect(res.isEmbeddable).toBeUndefined();
+      expect(res.embeddingAllowed).toBeUndefined();
     });
   });
 });

@@ -148,9 +148,9 @@ describe('PinterestPlatformDetector Suite', () => {
   });
 
   describe('Download Host Authorization', () => {
-    it('authorizes official Pinterest CDN hosts', () => {
+    it('authorizes official Pinterest CDN hosts and rejects legacy/foreign hosts', () => {
       expect(detector.isAllowedDownloadHost('i.pinimg.com')).toBe(true);
-      expect(detector.isAllowedDownloadHost('s-media-cache-ak0.pinimg.com')).toBe(true);
+      expect(detector.isAllowedDownloadHost('s-media-cache-ak0.pinimg.com')).toBe(false);
     });
 
     it('rejects unapproved or foreign hostnames', () => {

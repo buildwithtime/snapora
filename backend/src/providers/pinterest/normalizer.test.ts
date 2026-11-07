@@ -56,6 +56,31 @@ describe('PinterestMetadataNormalizer Suite', () => {
     expect(normalized.author).toBeUndefined();
     expect(normalized.metadataCapability).toBe('EMBED_ONLY');
     expect(normalized.embedStatus).toBe('unknown');
+    expect(normalized.isEmbeddable).toBeUndefined();
+    expect(normalized.embeddingAllowed).toBeUndefined();
+  });
+
+  it('preserves identical unknown embedding permission status at top-level and nested preview', () => {
+    const normalized = normalizer.normalize({
+      pinId: validPinId,
+      canonicalUrl,
+      embedStatus: 'unknown'
+    });
+
+    const response = normalizer.buildResolveSuccess(normalized);
+
+    // Top-level embedding status assertions
+    expect(response.embedStatus).toBe('unknown');
+    expect(response.isEmbeddable).toBeUndefined();
+    expect(response.embeddingAllowed).toBeUndefined();
+    expect(response.embedUrl).toBeDefined();
+
+    // Nested preview embedding status assertions
+    expect(response.preview).toBeDefined();
+    expect(response.preview?.embedStatus).toBe('unknown');
+    expect(response.preview?.isEmbeddable).toBeUndefined();
+    expect(response.preview?.embeddingAllowed).toBeUndefined();
+    expect(response.preview?.embedUrl).toBe(response.embedUrl);
   });
 
   it('builds ResolveSuccess response enforcing non-circumvention download policy', () => {

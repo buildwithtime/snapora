@@ -42,9 +42,9 @@ describe('PinterestThumbnailService Suite', () => {
   });
 
   describe('isValidPinterestThumbnailUrl', () => {
-    it('accepts authorized Pinterest CDN thumbnail hosts', () => {
+    it('accepts authorized Pinterest CDN thumbnail hosts and rejects legacy hosts', () => {
       expect(isValidPinterestThumbnailUrl('https://i.pinimg.com/236x/test.jpg')).toBe(true);
-      expect(isValidPinterestThumbnailUrl('https://s-media-cache-ak0.pinimg.com/236x/test.jpg')).toBe(true);
+      expect(isValidPinterestThumbnailUrl('https://s-media-cache-ak0.pinimg.com/236x/test.jpg')).toBe(false);
     });
 
     it('rejects non-HTTPS URLs', () => {

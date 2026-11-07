@@ -120,9 +120,12 @@ The active `PinterestMediaProvider` (`backend/src/providers/pinterest/`) is impl
 * `PinterestMetadataNormalizer`: Unifies metadata with `embedStatus: 'unknown'`, 30-day lifecycle expiration dates, and strict non-circumvention markers (`downloadAvailable: false`, `downloadable: false`).
 
 ### B. Pinterest Compliance & Retention Guardrails
-* **30-Day API Data Retention**: Third-party API data strictly expires within 30 days pursuant to Pinterest Developer Terms, while user workspace metadata (notes, tags, collections) remains permanently preserved.
+* **30-Day API Data Retention & Policy Categorization**:
+  * *Pinterest-Derived Metadata*: Titles, author names, author URLs, preview thumbnail URLs, and embed snippets are strictly subject to a 30-day lifecycle expiration window (`metadataExpiresAt`).
+  * *User-Created Annotations*: Personal notes, custom tags, workspace collections, and user-assigned labels are user-authored and preserved at user discretion.
+  * *Canonical URLs & Pin Identifiers*: Whether platform identifiers and canonical permalinks constitute 'Pinterest Data' subject to mandatory 30-day deletion remains an unresolved policy interpretation across developer platforms. Snapora does not claim broad exemption; instead, it enforces transparent 30-day lifecycle timestamps on resolved metadata to enable refresh workflows.
 * **Strict Non-Circumvention Policy**: Zero stream ripping, original video downloading, or bulk image downloading. Only verified preview thumbnails and metadata export are supported.
-* **Network & SSRF Safeguards**: Whitelist strictly limits outbound connections to `www.pinterest.com`, `pinterest.com`, `pin.it`, `api.pinterest.com`, and `i.pinimg.com` / `s-media-cache-ak0.pinimg.com`.
+* **Network & SSRF Safeguards**: Whitelist strictly limits outbound connections to `www.pinterest.com`, `pinterest.com`, `pin.it`, `api.pinterest.com`, and `i.pinimg.com`. (Legacy `s-media-cache-ak0.pinimg.com` is omitted to minimize the security perimeter).
 * **Testing Status**: 89 dedicated unit and integration tests passing; 674 total tests across repository.
 
 ---

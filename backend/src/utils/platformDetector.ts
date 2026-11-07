@@ -499,8 +499,7 @@ export const PINTEREST_PIN_ID_REGEX = /^\d{16,22}$/;
 export const PINTEREST_CCTLD_REGEX = /^([a-z]{2,5}\.)?pinterest\.(co\.uk|ca|de|fr|com\.au|es|it|jp|co\.kr|ch|at|co\.nz|ie|se|pt)$/;
 
 export const EXACT_ALLOWED_PINTEREST_DOWNLOAD_HOSTS = new Set([
-  'i.pinimg.com',
-  's-media-cache-ak0.pinimg.com'
+  'i.pinimg.com'
 ]);
 
 export function isAllowedPinterestHost(hostname: string): boolean {

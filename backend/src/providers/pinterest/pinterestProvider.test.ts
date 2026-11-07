@@ -48,8 +48,7 @@ describe('PinterestMediaProvider Core & Integration Suite', () => {
 
     it('returns authorized thumbnail download hosts', () => {
       const hosts = provider.getAllowedDownloadHosts();
-      expect(hosts).toContain('i.pinimg.com');
-      expect(hosts).toContain('s-media-cache-ak0.pinimg.com');
+      expect(hosts).toEqual(['i.pinimg.com']);
     });
 
     it('determines whether it can resolve URLs', () => {
@@ -93,7 +92,19 @@ describe('PinterestMediaProvider Core & Integration Suite', () => {
       expect(res.contentId).toBe(validPinId);
       expect(res.title).toBe('Modern Architecture');
       expect(res.author).toBe('StudioOne');
+
+      // Top-level embedding status assertions
       expect(res.embedStatus).toBe('unknown');
+      expect(res.isEmbeddable).toBeUndefined();
+      expect(res.embeddingAllowed).toBeUndefined();
+      expect(res.embedUrl).toBeDefined();
+
+      // Nested preview embedding status assertions
+      expect(res.preview?.embedStatus).toBe('unknown');
+      expect(res.preview?.isEmbeddable).toBeUndefined();
+      expect(res.preview?.embeddingAllowed).toBeUndefined();
+      expect(res.preview?.embedUrl).toBe(res.embedUrl);
+
       expect(res.downloadAvailable).toBe(false);
       expect(res.media).toHaveLength(1);
       expect(res.media![0].downloadable).toBe(false);
@@ -229,6 +240,11 @@ describe('PinterestMediaProvider Core & Integration Suite', () => {
         expect(json.platform).toBe('pinterest');
         expect(json.shortcode).toBe('123456789012345678');
         expect(json.title).toBe('Architectural Blueprint');
+        expect(json.embedStatus).toBe('unknown');
+        expect(json.isEmbeddable).toBeUndefined();
+        expect(json.embeddingAllowed).toBeUndefined();
+        expect(json.embedUrl).toBeDefined();
+        expect(json.preview?.embedStatus).toBe('unknown');
         expect(json.downloadAvailable).toBe(false);
       } finally {
         await fastify.close();

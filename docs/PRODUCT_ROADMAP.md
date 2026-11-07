@@ -132,7 +132,7 @@ The existing, hardened Instagram engine remains fully active, supported, and pro
      * `PinterestThumbnailService`: 236x thumbnail verification via JPEG binary SOF markers and MIME type check with fail-soft fallback.
      * `PinterestMetadataNormalizer`: Standardized normalization with 30-day lifecycle retention timestamps and strict non-circumvention (`downloadAvailable: false`, `downloadable: false`).
   3. **Non-Circumvention Compliance**: Strict prohibition against bulk image downloading, video downloading, and stream ripping. Preview thumbnails and metadata export only.
-  4. **SSRF Allowlist**: Whitelist `i.pinimg.com`, `s-media-cache-ak0.pinimg.com`, `assets.pinterest.com`, `pinterest.com`, `pin.it`.
+  4. **SSRF Allowlist**: Whitelist `i.pinimg.com`, `assets.pinterest.com`, `pinterest.com`, `pin.it`. (Legacy `s-media-cache-ak0.pinimg.com` omitted to maintain tightest boundary).
   5. **Testing Status**: 674 automated tests passing (258 frontend + 416 backend) with 89 dedicated Pinterest provider tests.
 
 ---
